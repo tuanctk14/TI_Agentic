@@ -19,29 +19,35 @@ MAX_ITERATIONS = 12  # Tăng từ 5 lên 12 để đủ cho multi-step reasoning
 ollama.Client(host=OLLAMA_HOST)
 
 # System prompt cho Agent với enforced reasoning và quy trình 7 bước
-SYSTEM_PROMPT = """Bạn là AI Security Agent chuyên gia về Threat Intelligence. Sử dụng các tool để phân tích mối đe dọa.
+SYSTEM_PROMPT = """Bạn là AI Security Agent chuyên gia về Threat Intelligence. Phân tích mối đe dọa và trả lời theo format chuẩn.
 
 TOOLS AVAILABLE:
-- search_iocs(query, ioc_type?, risk_level?) — Tìm IOC. ioc_type: "IP"/"Domain"/"URL"/"Hash"/"Wallet"/"Yara". risk_level: "critical"/"high"/"medium"/"low"
+- search_iocs(query) — Tìm IOC trong database (hashes, domains, IPs, URLs)
 - search_malware(query) — Tìm malware
-- search_vulnerabilities(query, min_cvss?) — Tìm CVE
+- search_vulnerabilities(query) — Tìm CVE
 - get_device_matches(threat_name) — Tìm thiết bị bị ảnh hưởng
 - create_alert(severity, threat_name, affected_assets, reason, recommended_action) — Tạo alert
 - check_memory(entity_name) — Kiểm tra lịch sử
 
-QUY TRÌNH PHÂN TÍCH:
-1. search (search_iocs hoặc search_malware hoặc search_vulnerabilities)
-2. get_device_matches để tìm assets bị ảnh hưởng
-3. Quyết định: alert nếu (CVSS≥7.0 AND assets≥1) OR (exploit detected)
-4. create_alert nếu cần
+QUY TRÌNH (BẮT BUỘC):
+1. search_iocs(query) HOẶC search_malware(query) HOẶC search_vulnerabilities(query)
+2. Nếu tìm được: get_device_matches(threat_name) để tìm assets
+3. Quyết định: alert nếu (found AND risk_high) OR (exploit in wild)
+4. Nếu alert: create_alert(...)
 
-OUTPUT FORMAT (BẮT BUỘC):
-Threat Name: [tên mối đe dọa]
-Decision: [Alert / No Alert]
-Reason: [1-2 câu giải thích]
-Affected Assets: [số lượng hoặc danh sách]
+OUTPUT FORMAT (BẮT BUỘC SAU MỗI TRẢ LỜI):
 
-CHỈ GỌI TOOL ĐÚNG PARAMETERS. KHÔNG GỌI TOOL SAI CẬP.
+🎯 THREAT NAME: [tên mối đe dọa từ search result]
+📊 DECISION: [Alert / No Alert]
+💡 REASON: [giải thích ngắn 1-2 câu]
+🔗 AFFECTED ASSETS: [số lượng hoặc "N/A"]
+
+RULES:
+- Luôn gọi search_* trước
+- Nếu tìm được kết quả: hiển thị chi tiết từ result (type, score, description)
+- Nếu NOT found: nói rõ "IOC/CVE không tìm thấy trong database"
+- KHÔNG bao giờ bỏ qua search result - phải hiển thị dữ liệu tìm được
+- Response tối đa 200 ký tự (ngoài format trên)
 """
 
 # Tool definitions
@@ -302,7 +308,12 @@ def _execute_tool(tool_name: str, arguments: Dict[str, Any], store: Dict) -> Dic
 
         results = []
         for ioc in store.get("iocs", []):
-            if query in ioc.get("name", "").lower() or query in ioc.get("pattern", "").lower():
+            # Match by name, pattern, or exact hash
+            matches_query = (query in ioc.get("name", "").lower() or
+                           query in ioc.get("pattern", "").lower() or
+                           query == ioc.get("name", "").lower())
+
+            if matches_query:
                 if ioc_type and ioc.get("ioc_type") != ioc_type:
                     continue
                 if risk_level and ioc.get("risk_level") != risk_level:
@@ -310,15 +321,18 @@ def _execute_tool(tool_name: str, arguments: Dict[str, Any], store: Dict) -> Dic
                 results.append({
                     "name": ioc.get("name"),
                     "type": ioc.get("ioc_type"),
-                    "score": ioc.get("score"),
-                    "risk_level": ioc.get("risk_level"),
-                    "description": (ioc.get("description") or ioc.get("reason") or "N/A")[:100]
+                    "score": ioc.get("score", 0),
+                    "confidence": ioc.get("confidence", 0),
+                    "risk_level": ioc.get("risk_level", "unknown"),
+                    "created_at": ioc.get("created_at", "N/A"),
+                    "description": (ioc.get("description") or ioc.get("reason") or "N/A")[:150]
                 })
 
         return {
-            "success": True,
+            "success": len(results) > 0,
             "count": len(results),
-            "results": results[:10]  # Giới hạn 10 kết quả
+            "query": query,
+            "results": results[:5]  # Giới hạn 5 kết quả
         }
 
     elif tool_name == "search_malware":
@@ -326,21 +340,24 @@ def _execute_tool(tool_name: str, arguments: Dict[str, Any], store: Dict) -> Dic
 
         results = []
         for mal in store.get("malwares", []):
-            if query in mal.get("name", "").lower():
+            if query in mal.get("name", "").lower() or query == mal.get("name", "").lower():
                 results.append({
                     "name": mal.get("name"),
-                    "type": mal.get("type", "Unknown"),
+                    "aliases": mal.get("aliases", [])[:3],
+                    "malware_types": mal.get("malware_types", [])[:3],
                     "severity": mal.get("severity", "unknown"),
-                    "intrusion_sets": (mal.get("intrusion_sets") or [])[:3],
+                    "intrusion_sets": (mal.get("intrusion_sets") or [])[:2],
                     "target_countries": (mal.get("target_countries") or [])[:2],
                     "target_sectors": (mal.get("target_sectors") or [])[:2],
-                    "description": (mal.get("description") or "N/A")[:100]
+                    "created_at": mal.get("created_at", "N/A"),
+                    "description": (mal.get("description") or "N/A")[:150]
                 })
 
         return {
-            "success": True,
+            "success": len(results) > 0,
             "count": len(results),
-            "results": results[:5]
+            "query": query,
+            "results": results[:3]
         }
 
     elif tool_name == "search_vulnerabilities":
@@ -350,21 +367,27 @@ def _execute_tool(tool_name: str, arguments: Dict[str, Any], store: Dict) -> Dic
         results = []
         for vuln in store.get("vulnerabilities", []):
             cvss = vuln.get("cvss_v3_score") or vuln.get("cvss_score") or 0
-            if query in vuln.get("name", "").lower() or query in vuln.get("description_en", "").lower():
-                if cvss >= min_cvss:
-                    results.append({
-                        "cve": vuln.get("name"),
-                        "cvss": cvss,
-                        "severity": vuln.get("cvss_v3_severity") or vuln.get("severity"),
-                        "attack_vector": vuln.get("attack_vector", "N/A"),
-                        "cwe": (vuln.get("weaknesses") or [None])[0],
-                        "description": (vuln.get("description_en") or vuln.get("description") or "N/A")[:100]
-                    })
+            matches_query = (query in vuln.get("name", "").lower() or
+                           query in vuln.get("description_en", "").lower() or
+                           query == vuln.get("name", "").lower())
+
+            if matches_query and cvss >= min_cvss:
+                results.append({
+                    "cve": vuln.get("name"),
+                    "cvss_score": cvss,
+                    "severity": vuln.get("cvss_v3_severity") or vuln.get("severity") or "unknown",
+                    "attack_vector": vuln.get("attack_vector", "N/A"),
+                    "cisa_exploit": vuln.get("cisa_exploit_add", "N/A"),
+                    "weaknesses": (vuln.get("weaknesses") or [])[:2],
+                    "published": vuln.get("published", "N/A")[:10],
+                    "description": (vuln.get("description_en") or vuln.get("description") or "N/A")[:150]
+                })
 
         return {
-            "success": True,
+            "success": len(results) > 0,
             "count": len(results),
-            "results": results[:5]
+            "query": query,
+            "results": results[:3]
         }
 
     elif tool_name == "get_threat_detail":
