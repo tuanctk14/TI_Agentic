@@ -703,7 +703,8 @@ async def create_report(type: str = "daily"):
     now_vn    = datetime.now(VN_TZ)
     date_str  = now_vn.strftime("%Y-%m-%d_%H%M")
     pdf_path  = f"reports/{type}_report_{date_str}.pdf"
-    count_info = _gen_pdf(pdf_path, type, now_vn)
+    # Try HTML-based PDF first (better Vietnamese support)
+    count_info = _gen_pdf_html(pdf_path, type, now_vn)
     return {"status":"ok","message":f"Bao cao PDF da tao: {pdf_path}","file":pdf_path,"count_info":count_info}
 
 @app.get("/api/report/download")
@@ -724,6 +725,221 @@ async def download_report(file: str = Query(...)):
         media_type="application/pdf",
         headers={"Content-Disposition": f"inline; filename=\"{p.name}\""}
     )
+
+def _gen_pdf_html(out_path, report_type, now_vn=None):
+    """Generate PDF report using HTML (better Vietnamese support)"""
+    import pdfkit
+
+    if now_vn is None:
+        now_vn = datetime.now(VN_TZ)
+
+    # Filter data by period
+    today_str = now_vn.strftime("%Y-%m-%d")
+    week_start = (now_vn - timedelta(days=now_vn.weekday())).strftime("%Y-%m-%d")
+    month_str = now_vn.strftime("%Y-%m")
+
+    def in_period(item):
+        ca = str(item.get("created_at", "") or "")[:10]
+        mo = str(item.get("modified", "") or item.get("valid_from", "") or "")[:10]
+        date = ca if ca > mo else mo
+        if not date or len(date) < 7:
+            return True
+        if report_type == "daily":
+            return date == today_str
+        elif report_type == "weekly":
+            return date >= week_start
+        elif report_type == "monthly":
+            return date[:7] == month_str
+        return True
+
+    iocs = [i for i in store["iocs"] if in_period(i)]
+    mals = [m for m in store["malwares"] if in_period(m)]
+    vulns = [v for v in store["vulnerabilities"] if in_period(v)]
+    matches = [m for m in store["matches"] if in_period(m)]
+
+    period_label = {
+        "daily": f"ngay {now_vn.strftime('%d/%m/%Y')}",
+        "weekly": f"tuan tu {week_start}",
+        "monthly": f"thang {now_vn.strftime('%m/%Y')}",
+    }.get(report_type, "")
+
+    type_label = {
+        "daily": "HANG NGAY",
+        "weekly": "HANG TUAN",
+        "monthly": "HANG THANG"
+    }.get(report_type, "DINH KY")
+
+    # Build HTML
+    html = f"""
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 20px; color: #333; }}
+            h1 {{ text-align: center; color: #1a237e; font-size: 24px; margin-bottom: 10px; }}
+            h2 {{ color: #1a237e; font-size: 16px; margin-top: 20px; border-bottom: 2px solid #1a237e; padding-bottom: 5px; }}
+            .meta {{ text-align: center; font-size: 12px; color: #666; margin-bottom: 20px; }}
+            table {{ width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 11px; }}
+            th {{ background-color: #1a237e; color: white; padding: 8px; text-align: left; font-weight: bold; }}
+            td {{ padding: 6px 8px; border-bottom: 1px solid #ddd; }}
+            tr:nth-child(even) {{ background-color: #f5f5f5; }}
+            .critical {{ color: #b71c1c; font-weight: bold; }}
+            .high {{ color: #e65100; font-weight: bold; }}
+            .medium {{ color: #f57f17; }}
+            .low {{ color: #2e7d32; }}
+            .footer {{ margin-top: 30px; padding-top: 10px; border-top: 1px solid #ddd; text-align: center; font-size: 9px; color: #999; }}
+        </style>
+    </head>
+    <body>
+        <h1>BAO CAO THREAT INTELLIGENCE {type_label}</h1>
+        <div class="meta">
+            Ky: {period_label} | Tao luc: {now_vn.strftime('%d/%m/%Y %H:%M:%S')} (UTC+7) | Nguon: {store.get('source', '?')}
+        </div>
+
+        <h2>1. TONG QUAN</h2>
+        <table>
+            <tr>
+                <th>Chi so</th><th>Gia tri</th><th>Chi so</th><th>Gia tri</th>
+            </tr>
+            <tr>
+                <td>Tong IOC</td><td>{len(iocs)}</td><td>Critical</td><td>{sum(1 for i in iocs if i.get('risk_level')=='critical')}</td>
+            </tr>
+            <tr>
+                <td>False Positive</td><td>{sum(1 for i in iocs if i.get('is_false_positive'))}</td><td>High</td><td>{sum(1 for i in iocs if i.get('risk_level')=='high')}</td>
+            </tr>
+            <tr>
+                <td>Malware</td><td>{len(mals)}</td><td>CVE Critical</td><td>{sum(1 for v in vulns if v.get('severity')=='critical')}</td>
+            </tr>
+            <tr>
+                <td>Thiet bi anh huong</td><td>{len(set(m['asset_hostname'] for m in matches if 'asset_hostname' in m))}</td><td>Tong matches</td><td>{len(matches)}</td>
+            </tr>
+        </table>
+
+        <h2>2. IOC NGUY HIEM — {len([i for i in iocs if i.get('risk_level') in ('critical', 'high')])} muc ({period_label})</h2>
+        <table>
+            <tr>
+                <th>IOC</th><th>Loai</th><th>Muc do</th><th>Conf.</th><th>Ngay tao</th><th>Ly do</th>
+            </tr>
+    """
+
+    danger = [i for i in iocs if i.get("risk_level") in ("critical", "high")]
+    for i in danger[:35]:
+        severity_class = i.get("risk_level", "").lower()
+        html += f"""
+            <tr>
+                <td>{i.get('name', '?')[:60]}</td>
+                <td>{i.get('ioc_type', '?')}</td>
+                <td class="{severity_class}">{i.get('risk_level', '?').upper()}</td>
+                <td>{i.get('confidence', 0)}%</td>
+                <td>{str(i.get('created_at', ''))[:10]}</td>
+                <td>{i.get('reason', '')[:70]}</td>
+            </tr>
+        """
+
+    html += """
+        </table>
+
+        <h2>3. LO HONG — """ + str(len(vulns)) + """ muc (""" + period_label + """)</h2>
+        <table>
+            <tr>
+                <th>CVE</th><th>CVSS</th><th>Muc do</th><th>Phan mem</th><th>Patch</th><th>Ngay tao</th><th>Mo ta</th>
+            </tr>
+    """
+
+    for v in vulns[:25]:
+        severity_class = (v.get("severity") or "").lower()
+        html += f"""
+            <tr>
+                <td><b>{v.get('name', '?')}</b></td>
+                <td class="{severity_class}">{v.get('cvss_score', '?')}</td>
+                <td class="{severity_class}">{v.get('severity', '?').upper()}</td>
+                <td>{v.get('affected_software', '?')}</td>
+                <td>{"Co" if v.get('patch_available') else "Chua"}</td>
+                <td>{str(v.get('created_at', ''))[:10]}</td>
+                <td>{v.get('description', '')[:70]}</td>
+            </tr>
+        """
+
+    html += """
+        </table>
+
+        <h2>4. MALWARE — """ + str(len(mals)) + """ muc (""" + period_label + """)</h2>
+        <table>
+            <tr>
+                <th>Ten</th><th>Loai</th><th>Muc do</th><th>Ngay tao</th><th>Ngay chinh sua</th><th>Mo ta</th>
+            </tr>
+    """
+
+    for m in mals[:20]:
+        severity_class = (m.get("severity") or "").lower()
+        html += f"""
+            <tr>
+                <td><b>{m.get('name', '?')}</b></td>
+                <td>{", ".join(m.get('malware_types', []))[:25]}</td>
+                <td class="{severity_class}">{m.get('severity', '?').upper()}</td>
+                <td>{str(m.get('created_at', ''))[:10]}</td>
+                <td>{str(m.get('modified', ''))[:10]}</td>
+                <td>{m.get('description', '')[:90]}</td>
+            </tr>
+        """
+
+    html += """
+        </table>
+
+        <h2>5. THIET BI BI ANH HUONG — """ + str(len([m for m in matches if m.get("risk_level") in ("critical", "high")])) + """ muc</h2>
+        <table>
+            <tr>
+                <th>Thiet bi</th><th>IP</th><th>Moi de doa</th><th>Loai</th><th>Muc do</th><th>Hanh dong</th>
+            </tr>
+    """
+
+    crit_m = [m for m in matches if m.get("risk_level") in ("critical", "high")]
+    for m in crit_m[:25]:
+        severity_class = (m.get("risk_level") or "").lower()
+        html += f"""
+            <tr>
+                <td><b>{m.get('asset_hostname', '?')}</b></td>
+                <td>{m.get('asset_ip', '?')}</td>
+                <td>{m.get('threat_name', '?')[:60]}</td>
+                <td>{m.get('match_type', '?')}</td>
+                <td class="{severity_class}">{m.get('risk_level', '?').upper()}</td>
+                <td>{m.get('recommendation', '')[:70]}</td>
+            </tr>
+        """
+
+    html += f"""
+        </table>
+
+        <div class="footer">
+            Bao cao tu dong boi TI Agentic | {now_vn.strftime('%d/%m/%Y %H:%M:%S')} (UTC+7) | Ky: {period_label}
+        </div>
+    </body>
+    </html>
+    """
+
+    # Convert HTML to PDF
+    try:
+        options = {
+            'page-size': 'A4',
+            'margin-top': '0.75in',
+            'margin-right': '0.75in',
+            'margin-bottom': '0.75in',
+            'margin-left': '0.75in',
+            'encoding': "UTF-8",
+            'no-outline': None,
+            'enable-local-file-access': None,
+        }
+        pdfkit.from_string(html, out_path, options=options)
+        print(f"PDF (HTML): {out_path}")
+        return f"IOC: {len(iocs)} | CVE: {len(vulns)} | Malware: {len(mals)} | Ky: {period_label}"
+    except Exception as e:
+        print(f"PDF generation error: {e}")
+        # Fallback: save as HTML
+        html_path = out_path.replace('.pdf', '.html')
+        with open(html_path, 'w', encoding='utf-8') as f:
+            f.write(html)
+        print(f"Fallback HTML: {html_path}")
+        return f"HTML (fallback): {html_path}"
 
 def _gen_pdf(out_path,report_type,now_vn=None):
     from reportlab.lib.pagesizes import A4
