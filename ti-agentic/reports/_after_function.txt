@@ -1,0 +1,1 @@
+Function returned: Report: 417 IOCs, 0 CVEs, 31 Malware (Month — 05/2026)

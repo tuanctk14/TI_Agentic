@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Threat Intelligence Report</title>
+<style>
+  /* ===== RESET & BASE ===== */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: 11px;
+    color: #1a1a1a;
+    background: #fff;
+    line-height: 1.5;
+  }
+
+  /* ===== PAGE LAYOUT ===== */
+  .page {
+    width: 297mm;
+    min-height: 210mm;
+    margin: 0 auto;
+    padding: 12mm 14mm 12mm 14mm;
+    background: #fff;
+  }
+
+  /* ===== PRINT STYLES ===== */
+  @media print {
+    @page {
+      size: A4 landscape;
+      margin: 10mm 12mm;
+    }
+    body { background: #fff; }
+    .page { width: 100%; padding: 0; margin: 0; }
+    .no-print { display: none !important; }
+    .section { page-break-inside: avoid; }
+    .section-table { page-break-inside: auto; }
+    tr { page-break-inside: avoid; }
+    .page-break { page-break-before: always; }
+  }
+
+  /* ===== PRINT BUTTON ===== */
+  .print-bar {
+    position: fixed;
+    top: 16px; right: 16px;
+    display: flex; gap: 8px;
+    z-index: 100;
+  }
+  .btn-print {
+    background: #C0392B;
+    color: #fff;
+    border: none;
+    padding: 8px 18px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    letter-spacing: 0.03em;
+  }
+  .btn-print:hover { background: #a93226; }
+
+  /* ===== HEADER ===== */
+  .report-header {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    margin-bottom: 10px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .header-accent {
+    width: 5px;
+    background: #C0392B;
+    flex-shrink: 0;
+  }
+  .header-body {
+    flex: 1;
+    padding: 9px 12px;
+    background: #f8f8f8;
+  }
+  .header-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+  .report-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #1a1a1a;
+    letter-spacing: -0.02em;
+  }
+  .report-subtitle {
+    font-size: 10px;
+    color: #666;
+    margin-top: 1px;
+  }
+  .tlp-badge {
+    background: #e67e22;
+    color: #fff;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 3px;
+    letter-spacing: 0.08em;
+    white-space: nowrap;
+  }
+  .header-meta {
+    display: flex;
+    gap: 20px;
+    margin-top: 7px;
+    flex-wrap: wrap;
+  }
+  .meta-item { font-size: 10px; color: #555; }
+  .meta-item strong { color: #1a1a1a; font-weight: 600; }
+
+  /* ===== SUMMARY CARDS ===== */
+  .summary-bar {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .sum-card {
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 8px 10px;
+    background: #fafafa;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .sum-icon {
+    width: 8px;
+    height: 32px;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+  .icon-ioc { background: #2980b9; }
+  .icon-yara { background: #27ae60; }
+  .icon-malware { background: #C0392B; }
+  .icon-vuln { background: #d68910; }
+  .sum-content {}
+  .sum-num {
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .num-ioc { color: #2980b9; }
+  .num-yara { color: #27ae60; }
+  .num-mal { color: #C0392B; }
+  .num-vuln { color: #d68910; }
+  .sum-lbl {
+    font-size: 9px;
+    color: #888;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-top: 2px;
+  }
+
+  /* ===== SECTION ===== */
+  .section { margin-bottom: 12px; }
+  .section-head {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-bottom: 5px;
+    padding-bottom: 4px;
+    border-bottom: 2px solid #f0f0f0;
+  }
+  .section-stripe {
+    width: 4px;
+    height: 16px;
+    border-radius: 2px;
+  }
+  .stripe-ioc { background: #2980b9; }
+  .stripe-yara { background: #27ae60; }
+  .stripe-malware { background: #C0392B; }
+  .stripe-vuln { background: #d68910; }
+  .section-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: #1a1a1a;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+  }
+  .section-count {
+    font-size: 9px;
+    color: #888;
+    background: #f0f0f0;
+    border: 1px solid #e0e0e0;
+    padding: 1px 7px;
+    border-radius: 10px;
+  }
+
+  /* ===== TABLE ===== */
+  .table-wrap {
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    overflow: hidden;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 10px;
+    table-layout: fixed;
+  }
+  thead tr {
+    background: #f2f2f2;
+  }
+  th {
+    padding: 5px 7px;
+    text-align: left;
+    font-weight: 700;
+    font-size: 9px;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-bottom: 1px solid #ddd;
+    white-space: nowrap;
+  }
+  td {
+    padding: 5px 7px;
+    color: #1a1a1a;
+    border-bottom: 1px solid #ebebeb;
+    vertical-align: top;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:nth-child(even) td { background: #fafafa; }
+
+  /* ===== BADGES ===== */
+  .badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 9px;
+    font-weight: 600;
+    white-space: nowrap;
+    letter-spacing: 0.02em;
+  }
+  .b-ip      { background: #d6eaf8; color: #1a5276; border: 1px solid #a9cce3; }
+  .b-domain  { background: #d5f5e3; color: #1e8449; border: 1px solid #a9dfbf; }
+  .b-hash    { background: #e8daef; color: #6c3483; border: 1px solid #d2b4de; }
+  .b-url     { background: #fdebd0; color: #784212; border: 1px solid #f5cba7; }
+  .b-email   { background: #fce4d6; color: #922b21; border: 1px solid #f1948a; }
+  .b-critical{ background: #f1948a; color: #7b241c; border: 1px solid #e74c3c; }
+  .b-high    { background: #fce4d6; color: #922b21; border: 1px solid #f1948a; }
+  .b-medium  { background: #fdebd0; color: #784212; border: 1px solid #f5cba7; }
+  .b-low     { background: #d5f5e3; color: #1e8449; border: 1px solid #a9dfbf; }
+  .b-apt     { background: #e8daef; color: #6c3483; border: 1px solid #d2b4de; }
+  .b-malware { background: #fce4d6; color: #922b21; border: 1px solid #f1948a; }
+  .b-ransomware { background: #fadbd8; color: #922b21; border: 1px solid #f1948a; }
+  .b-trojan  { background: #f9ebea; color: #922b21; border: 1px solid #f5b7b1; }
+  .b-phishing{ background: #d6eaf8; color: #1a5276; border: 1px solid #a9cce3; }
+  .b-patch   { background: #fdebd0; color: #784212; border: 1px solid #f5cba7; }
+  .b-mitigated{ background: #d5f5e3; color: #1e8449; border: 1px solid #a9dfbf; }
+  .b-confirmed{ background: #fadbd8; color: #922b21; border: 1px solid #f1948a; }
+  .b-analysis{ background: #d6eaf8; color: #1a5276; border: 1px solid #a9cce3; }
+  .b-network { background: #d6eaf8; color: #1a5276; border: 1px solid #a9cce3; }
+  .b-adjacent{ background: #e8daef; color: #6c3483; border: 1px solid #d2b4de; }
+  .b-local   { background: #f2f3f4; color: #444; border: 1px solid #ccc; }
+
+  /* ===== SCORE ===== */
+  .score { font-family: 'Courier New', monospace; font-weight: 700; font-size: 10px; }
+  .score-h { color: #c0392b; }
+  .score-m { color: #d68910; }
+  .score-l { color: #27ae60; }
+
+  /* ===== MONO ===== */
+  .mono { font-family: 'Courier New', monospace; font-size: 9.5px; color: #1a1a1a; }
+  .date { font-family: 'Courier New', monospace; font-size: 9px; color: #555; white-space: nowrap; }
+
+  /* ===== TAGS ===== */
+  .tag-list { display: flex; flex-wrap: wrap; gap: 2px; }
+  .tag {
+    display: inline-block;
+    padding: 0 5px;
+    background: #f0f0f0;
+    border: 1px solid #ddd;
+    border-radius: 2px;
+    font-size: 8.5px;
+    color: #444;
+    white-space: nowrap;
+  }
+
+  /* ===== SECTION: IOC ===== */
+  .ioc-table col:nth-child(1) { width: 17%; }
+  .ioc-table col:nth-child(2) { width: 9%; }
+  .ioc-table col:nth-child(3) { width: 6%; }
+  .ioc-table col:nth-child(4) { width: 9%; }
+  .ioc-table col:nth-child(5) { width: 9%; }
+  .ioc-table col:nth-child(6) { width: 9%; }
+  .ioc-table col:nth-child(7) { width: auto; }
+
+  /* ===== SECTION: YARA ===== */
+  .yara-table col:nth-child(1) { width: 17%; }
+  .yara-table col:nth-child(2) { width: 12%; }
+  .yara-table col:nth-child(3) { width: 11%; }
+  .yara-table col:nth-child(4) { width: 10%; }
+  .yara-table col:nth-child(5) { width: 6%; }
+  .yara-table col:nth-child(6) { width: 9%; }
+  .yara-table col:nth-child(7) { width: auto; }
+
+  /* ===== SECTION: MALWARE ===== */
+  .mal-table col:nth-child(1) { width: 11%; }
+  .mal-table col:nth-child(2) { width: 12%; }
+  .mal-table col:nth-child(3) { width: 13%; }
+  .mal-table col:nth-child(4) { width: 14%; }
+  .mal-table col:nth-child(5) { width: auto; }
+  .mal-table col:nth-child(6) { width: 9%; }
+  .mal-table col:nth-child(7) { width: 9%; }
+
+  /* ===== SECTION: VULN ===== */
+  .vuln-table col:nth-child(1) { width: 12%; }
+  .vuln-table col:nth-child(2) { width: 6%; }
+  .vuln-table col:nth-child(3) { width: 8%; }
+  .vuln-table col:nth-child(4) { width: 10%; }
+  .vuln-table col:nth-child(5) { width: 9%; }
+  .vuln-table col:nth-child(6) { width: 11%; }
+  .vuln-table col:nth-child(7) { width: 9%; }
+  .vuln-table col:nth-child(8) { width: 9%; }
+  .vuln-table col:nth-child(9) { width: auto; }
+
+  /* ===== FOOTER ===== */
+  .report-footer {
+    margin-top: 10px;
+    padding-top: 6px;
+    border-top: 1px solid #e0e0e0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 9px;
+    color: #888;
+  }
+  .footer-left { display: flex; gap: 16px; }
+
+  /* ===== DIVIDER ===== */
+  .divider {
+    height: 1px;
+    background: #ebebeb;
+    margin: 9px 0;
+  }
+</style>
+</head>
+<body>
+
+<!-- Print Button (hidden on print) -->
+<div class="print-bar no-print">
+  <button class="btn-print" onclick="window.print()">&#128438; In / Xuất PDF</button>
+</div>
+
+<div class="page">
+
+  <!-- ===== REPORT HEADER ===== -->
+  <div class="report-header">
+    <div class="header-accent"></div>
+    <div class="header-body">
+      <div class="header-top">
+        <div>
+          <div class="report-title">Threat Intelligence Report</div>
+          <div class="report-subtitle">Báo cáo tình báo mối đe dọa — Tổng hợp IOC · YARA · Malware · Vulnerability</div>
+        </div>
+        <span class="tlp-badge">TLP: AMBER</span>
+      </div>
+      <div class="header-meta">
+        <span class="meta-item">Tổ chức: <strong>ACME SOC Team</strong></span>
+        <span class="meta-item">Kỳ báo cáo: <strong>Ngày — 04/05/2026</strong></span>
+        <span class="meta-item">Người tạo: <strong>Threat Intel Analyst</strong></span>
+        <span class="meta-item">Nền tảng: <strong>TIP v2.4</strong></span>
+        <span class="meta-item">Phiên bản: <strong>1.0</strong></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== SUMMARY BAR ===== -->
+  <div class="summary-bar">
+    <div class="sum-card">
+      <div class="sum-icon icon-ioc"></div>
+      <div class="sum-content">
+        <div class="sum-num num-ioc">12</div>
+        <div class="sum-lbl">IOC</div>
+      </div>
+    </div>
+    <div class="sum-card">
+      <div class="sum-icon icon-yara"></div>
+      <div class="sum-content">
+        <div class="sum-num num-yara">5</div>
+        <div class="sum-lbl">YARA Rules</div>
+      </div>
+    </div>
+    <div class="sum-card">
+      <div class="sum-icon icon-malware"></div>
+      <div class="sum-content">
+        <div class="sum-num num-mal">3</div>
+        <div class="sum-lbl">Malware</div>
+      </div>
+    </div>
+    <div class="sum-card">
+      <div class="sum-icon icon-vuln"></div>
+      <div class="sum-content">
+        <div class="sum-num num-vuln">8</div>
+        <div class="sum-lbl">Vulnerabilities</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== SECTION 1: IOC ===== -->
+  <div class="section">
+    <div class="section-head">
+      <div class="section-stripe stripe-ioc"></div>
+      <span class="section-title">Indicators of Compromise (IOC)</span>
+      <span class="section-count">Ngày — 12 chỉ số</span>
+    </div>
+    <div class="table-wrap">
+      <table class="ioc-table">
+        <colgroup>
+          <col><col><col><col><col><col><col>
+        </colgroup>
+        <thead>
+          <tr>
+            <th>IOC</th>
+            <th>Loại</th>
+            <th>Điểm</th>
+            <th>Ngày tạo</th>
+            <th>Valid From</th>
+            <th>Valid Until</th>
+            <th>Mô tả</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="mono">185.220.101.47</td>
+            <td><span class="badge b-ip">IP</span></td>
+            <td><span class="score score-h">85</span></td>
+            <td class="date">2026-05-04</td>
+            <td class="date">2026-05-04</td>
+            <td class="date">2026-05-18</td>
+            <td>Tor exit node liên quan chiến dịch phishing ngân hàng khu vực Đông Nam Á</td>
+          </tr>
+          <tr>
+            <td class="mono">malware-cdn[.]ru</td>
+            <td><span class="badge b-domain">Domain</span></td>
+            <td><span class="score score-h">92</span></td>
+            <td class="date">2026-05-04</td>
+            <td class="date">2026-05-03</td>
+            <td class="date">2026-06-03</td>
+            <td>Domain phân phối payload Emotet giai đoạn 2, C2 chính nhóm TA542</td>
+          </tr>
+          <tr>
+            <td class="mono">a3f8c12d9e01b4f7...b7e4</td>
+            <td><span class="badge b-hash">Hash MD5</span></td>
+            <td><span class="score score-h">78</span></td>
+            <td class="date">2026-05-04</td>
+            <td class="date">2026-05-04</td>
+            <td class="date">2026-08-04</td>
+            <td>Dropper shellcode liên kết với chiến dịch AgentTesla v3</td>
+          </tr>
+          <tr>
+            <td class="mono">hxxps://dl[.]evil[.]cc/upd</td>
+            <td><span class="badge b-url">URL</span></td>
+            <td><span class="score score-m">65</span></td>
+            <td class="date">2026-05-03</td>
+            <td class="date">2026-05-03</td>
+            <td class="date">2026-05-17</td>
+            <td>C2 download URL nhóm Lazarus APT, phân phối second-stage payload</td>
+          </tr>
+          <tr>
+            <td class="mono">attacker@proton[.]me</td>
+            <td><span class="badge b-email">Email</span></td>
+            <td><span class="score score-m">55</span></td>
+            <td class="date">2026-05-04</td>
+            <td class="date">2026-05-01</td>
+            <td class="date">2026-05-31</td>
+            <td>Địa chỉ gửi spear-phishing nhắm vào bộ phận tài chính doanh nghiệp</td>
+          </tr>
+          <tr>
+            <td class="mono">10.20.30.99</td>
+            <td><span class="badge b-ip">IP</span></td>
+            <td><span class="score score-l">35</span></td>
+            <td class="date">2026-05-04</td>
+            <td class="date">2026-05-04</td>
+            <td class="date">2026-05-11</td>
+            <td>IP nội bộ nghi bị lateral movement, cần điều tra thêm</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- ===== SECTION 2: YARA RULES ===== -->
+  <div class="section">
+    <div class="section-head">
+      <div class="section-stripe stripe-yara"></div>
+      <span class="section-title">YARA Rules</span>
+      <span class="section-count">Ngày — 5 rules</span>
+    </div>
+    <div class="table-wrap">
+      <table class="yara-table">
+        <colgroup>
+          <col><col><col><col><col><col><col>
+        </colgroup>
+        <thead>
+          <tr>
+            <th>Tên rule</th>
+            <th>Tác giả</th>
+            <th>Nguồn</th>
+            <th>Loại</th>
+            <th>Điểm</th>
+            <th>Ngày tạo</th>
+            <th>Mô tả</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="mono">Emotet_loader_v4</td>
+            <td>SOC-VN Team</td>
+            <td>Internal</td>
+            <td><span class="badge b-malware">Malware</span></td>
+            <td><span class="score score-h">90</span></td>
+            <td class="date">2026-05-04</td>
+            <td>Phát hiện Emotet loader thông qua chuỗi đặc trưng trong PE section và import table</td>
+          </tr>
+          <tr>
+            <td class="mono">APT_Cobalt_beacon</td>
+            <td>Mandiant</td>
+            <td>Open Source</td>
+            <td><span class="badge b-apt">APT</span></td>
+            <td><span class="score score-h">88</span></td>
+            <td class="date">2026-05-03</td>
+            <td>Nhận dạng Cobalt Strike beacon mã hóa XOR-0x69, profile malleable C2</td>
+          </tr>
+          <tr>
+            <td class="mono">Ransomware_LockBit3</td>
+            <td>CISA</td>
+            <td>Gov Feed</td>
+            <td><span class="badge b-ransomware">Ransomware</span></td>
+            <td><span class="score score-h">95</span></td>
+            <td class="date">2026-05-04</td>
+            <td>Phát hiện LockBit 3.0 dựa trên chuỗi ransom note và mutex đặc trưng</td>
+          </tr>
+          <tr>
+            <td class="mono">Phishing_HTML_kit</td>
+            <td>Any.run Labs</td>
+            <td>Threat Feed</td>
+            <td><span class="badge b-phishing">Phishing</span></td>
+            <td><span class="score score-m">62</span></td>
+            <td class="date">2026-05-02</td>
+            <td>HTML phishing kit giả mạo trang đăng nhập Microsoft 365, chứa obfuscated JS</td>
+          </tr>
+          <tr>
+            <td class="mono">Stealer_RedLine_cfg</td>
+            <td>SOC-VN Team</td>
+            <td>Internal</td>
+            <td><span class="badge b-trojan">Stealer</span></td>
+            <td><span class="score score-m">74</span></td>
+            <td class="date">2026-05-04</td>
+            <td>Nhận dạng config blob RedLine Stealer qua magic bytes và cấu trúc header đặc trưng</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ===== PAGE BREAK ===== -->
+  <div class="page-break"></div>
+
+  <!-- ===== SECTION 3: MALWARE ===== -->
+  <div class="section">
+    <div class="section-head">
+      <div class="section-stripe stripe-malware"></div>
+      <span class="section-title">Malware</span>
+      <span class="section-count">Ngày — 3 mẫu</span>
+    </div>
+    <div class="table-wrap">
+      <table class="mal-table">
+        <colgroup>
+          <col><col><col><col><col><col><col>
+        </colgroup>
+        <thead>
+          <tr>
+            <th>Tên</th>
+            <th>Intrusion Sets</th>
+            <th>Quốc gia mục tiêu</th>
+            <th>Lĩnh vực mục tiêu</th>
+            <th>Mô tả</th>
+            <th>Ngày tạo</th>
+            <th>Ngày chỉnh sửa</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="font-weight:700">Emotet</td>
+            <td><span class="badge b-apt">TA542</span></td>
+            <td>
+              <div class="tag-list">
+                <span class="tag">Vietnam</span>
+                <span class="tag">USA</span>
+                <span class="tag">Germany</span>
+                <span class="tag">Japan</span>
+              </div>
+            </td>
+            <td>
+              <div class="tag-list">
+                <span class="tag">Finance</span>
+                <span class="tag">Government</span>
+                <span class="tag">Healthcare</span>
+              </div>
+            </td>
+            <td>Modular banking trojan phân phối qua email spam chứa macro Office độc hại. Có khả năng tải thêm module, đánh cắp thông tin xác thực và hoạt động như spam bot.</td>
+            <td class="date">2026-05-04</td>
+            <td class="date">2026-05-04</td>
+          </tr>
+          <tr>
+            <td style="font-weight:700">LockBit 3.0</td>
+            <td><span class="badge b-apt">LockBit Gang</span></td>
+            <td>
+              <div class="tag-list">
+                <span class="tag">Japan</span>
+                <span class="tag">Australia</span>
+                <span class="tag">Vietnam</span>
+                <span class="tag">UK</span>
+              </div>
+            </td>
+            <td>
+              <div class="tag-list">
+                <span class="tag">Healthcare</span>
+                <span class="tag">Manufacturing</span>
+                <span class="tag">Legal</span>
+              </div>
+            </td>
+            <td>Ransomware-as-a-Service (RaaS) mã hóa AES-256 kết hợp chiến thuật double extortion. Khai thác lỗ hổng RDP, VPN và phishing để xâm nhập ban đầu.</td>
+            <td class="date">2026-04-30</td>
+            <td class="date">2026-05-04</td>
+          </tr>
+          <tr>
+            <td style="font-weight:700">RedLine Stealer</td>
+            <td><span class="badge b-apt">Unknown</span></td>
+            <td>
+              <div class="tag-list">
+                <span class="tag">Vietnam</span>
+                <span class="tag">Thailand</span>
+                <span class="tag">Philippines</span>
+              </div>
+            </td>
+            <td>
+              <div class="tag-list">
+                <span class="tag">Retail</span>
+                <span class="tag">Education</span>
+                <span class="tag">SMB</span>
+              </div>
+            </td>
+            <td>Credential stealer đánh cắp cookie, mật khẩu trình duyệt, ví tiền điện tử, thông tin FTP/VPN qua kết nối TCP đến C2. Phân phối qua cracked software.</td>
+            <td class="date">2026-05-03</td>
+            <td class="date">2026-05-04</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- ===== SECTION 4: VULNERABILITY ===== -->
+  <div class="section">
+    <div class="section-head">
+      <div class="section-stripe stripe-vuln"></div>
+      <span class="section-title">Vulnerabilities</span>
+      <span class="section-count">Ngày — 8 CVE</span>
+    </div>
+    <div class="table-wrap">
+      <table class="vuln-table">
+        <colgroup>
+          <col><col><col><col><col><col><col><col><col>
+        </colgroup>
+        <thead>
+          <tr>
+            <th>CVE ID</th>
+            <th>CVSS</th>
+            <th>Mức độ</th>
+            <th>Vector tấn công</th>
+            <th>Độ phức tạp</th>
+            <th>Trạng thái</th>
+            <th>Công bố</th>
+            <th>Cập nhật</th>
+            <th>Điểm yếu CWE</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="mono" style="font-weight:700;color:#C0392B">CVE-2026-1234</td>
+            <td><span class="score score-h">9.8</span></td>
+            <td><span class="badge b-critical">Critical</span></td>
+            <td><span class="badge b-network">Network</span></td>
+            <td><span class="badge b-low">Low</span></td>
+            <td><span class="badge b-confirmed">Confirmed</span></td>
+            <td class="date">2026-05-01</td>
+            <td class="date">2026-05-04</td>
+            <td>CWE-89: SQL Injection</td>
+          </tr>
+          <tr>
+            <td class="mono" style="font-weight:700">CVE-2026-0987</td>
+            <td><span class="score score-h">8.1</span></td>
+            <td><span class="badge b-high">High</span></td>
+            <td><span class="badge b-network">Network</span></td>
+            <td><span class="badge b-high">High</span></td>
+            <td><span class="badge b-patch">Patch Available</span></td>
+            <td class="date">2026-04-28</td>
+            <td class="date">2026-05-03</td>
+            <td>CWE-78: OS Command Injection</td>
+          </tr>
+          <tr>
+            <td class="mono" style="font-weight:700">CVE-2025-9876</td>
+            <td><span class="score score-h">7.5</span></td>
+            <td><span class="badge b-high">High</span></td>
+            <td><span class="badge b-adjacent">Adjacent</span></td>
+            <td><span class="badge b-low">Low</span></td>
+            <td><span class="badge b-mitigated">Mitigated</span></td>
+            <td class="date">2025-12-10</td>
+            <td class="date">2026-05-04</td>
+            <td>CWE-416: Use After Free</td>
+          </tr>
+          <tr>
+            <td class="mono" style="font-weight:700">CVE-2026-1100</td>
+            <td><span class="score score-m">6.5</span></td>
+            <td><span class="badge b-medium">Medium</span></td>
+            <td><span class="badge b-local">Local</span></td>
+            <td><span class="badge b-high">High</span></td>
+            <td><span class="badge b-analysis">Under Analysis</span></td>
+            <td class="date">2026-05-04</td>
+            <td class="date">2026-05-04</td>
+            <td>CWE-125: Out-of-bounds Read</td>
+          </tr>
+          <tr>
+            <td class="mono" style="font-weight:700">CVE-2026-0555</td>
+            <td><span class="score score-m">5.4</span></td>
+            <td><span class="badge b-medium">Medium</span></td>
+            <td><span class="badge b-network">Network</span></td>
+            <td><span class="badge b-low">Low</span></td>
+            <td><span class="badge b-patch">Patch Available</span></td>
+            <td class="date">2026-05-02</td>
+            <td class="date">2026-05-04</td>
+            <td>CWE-79: Cross-Site Scripting (XSS)</td>
+          </tr>
+          <tr>
+            <td class="mono" style="font-weight:700">CVE-2026-0312</td>
+            <td><span class="score score-m">5.0</span></td>
+            <td><span class="badge b-medium">Medium</span></td>
+            <td><span class="badge b-network">Network</span></td>
+            <td><span class="badge b-low">Low</span></td>
+            <td><span class="badge b-mitigated">Mitigated</span></td>
+            <td class="date">2026-04-25</td>
+            <td class="date">2026-05-02</td>
+            <td>CWE-200: Information Exposure</td>
+          </tr>
+          <tr>
+            <td class="mono" style="font-weight:700">CVE-2026-0201</td>
+            <td><span class="score score-l">3.7</span></td>
+            <td><span class="badge b-low">Low</span></td>
+            <td><span class="badge b-local">Local</span></td>
+            <td><span class="badge b-high">High</span></td>
+            <td><span class="badge b-analysis">Under Analysis</span></td>
+            <td class="date">2026-05-01</td>
+            <td class="date">2026-05-04</td>
+            <td>CWE-369: Divide By Zero</td>
+          </tr>
+          <tr>
+            <td class="mono" style="font-weight:700">CVE-2026-0099</td>
+            <td><span class="score score-l">2.1</span></td>
+            <td><span class="badge b-low">Low</span></td>
+            <td><span class="badge b-local">Local</span></td>
+            <td><span class="badge b-high">High</span></td>
+            <td><span class="badge b-mitigated">Mitigated</span></td>
+            <td class="date">2026-04-20</td>
+            <td class="date">2026-04-30</td>
+            <td>CWE-311: Missing Encryption</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ===== FOOTER ===== -->
+  <div class="report-footer">
+    <div class="footer-left">
+      <span><strong>TLP: AMBER</strong> — Chỉ chia sẻ nội bộ tổ chức và đối tác được xác nhận</span>
+      <span>Nguồn: MISP · VirusTotal · NVD · Internal Honeypot</span>
+    </div>
+    <span>ACME SOC Team · Threat Intelligence Platform v2.4 · Trang 1/1</span>
+  </div>
+
+</div><!-- end .page -->
+
+</body>
+</html>

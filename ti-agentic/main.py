@@ -700,10 +700,21 @@ async def list_reports():
 
 @app.post("/api/report")
 async def create_report(type: str = "daily"):
+    with open('reports/_endpoint_called.txt', 'w') as f:
+        f.write(f"Endpoint called with type={type}\n")
+
     now_vn    = datetime.now(VN_TZ)
     date_str  = now_vn.strftime("%Y-%m-%d_%H%M")
     pdf_path  = f"reports/{type}_report_{date_str}.pdf"
+
+    with open('reports/_before_function.txt', 'w') as f:
+        f.write(f"About to call _gen_pdf_html\n")
+
     count_info = _gen_pdf_html(pdf_path, type, now_vn)
+
+    with open('reports/_after_function.txt', 'w') as f:
+        f.write(f"Function returned: {count_info}\n")
+
     return {"status":"ok","message":f"Bao cao PDF da tao: {pdf_path}","file":pdf_path,"count_info":count_info}
 
 @app.get("/api/report/download")
@@ -727,6 +738,9 @@ async def download_report(file: str = Query(...)):
 
 def _gen_pdf_html(out_path, report_type, now_vn=None):
     """Generate PDF from HTML template using the professional threat-intelligence-report.html design"""
+    with open('reports/_function_called.txt', 'w') as f:
+        f.write("_gen_pdf_html function called\n")
+
     if now_vn is None:
         now_vn = datetime.now(VN_TZ)
 
@@ -757,9 +771,9 @@ def _gen_pdf_html(out_path, report_type, now_vn=None):
     matches = [m for m in store["matches"] if in_period(m)]
 
     period_label = {
-        "daily": f"Ngày — {now_vn.strftime('%d/%m/%Y')}",
-        "weekly": f"Tuần từ {week_start}",
-        "monthly": f"Tháng — {now_vn.strftime('%m/%Y')}",
+        "daily": f"Day — {now_vn.strftime('%d/%m/%Y')}",
+        "weekly": f"Week from {week_start}",
+        "monthly": f"Month — {now_vn.strftime('%m/%Y')}",
     }.get(report_type, "")
 
     # Build HTML from template
@@ -843,16 +857,16 @@ def _gen_pdf_html(out_path, report_type, now_vn=None):
       <div class="header-top">
         <div>
           <div class="report-title">Threat Intelligence Report</div>
-          <div class="report-subtitle">Báo cáo tình báo mối đe dọa — Tổng hợp IOC · YARA · Malware · Vulnerability</div>
+          <div class="report-subtitle">Comprehensive Summary — IOC · YARA · Malware · Vulnerability</div>
         </div>
         <span class="tlp-badge">TLP: AMBER</span>
       </div>
       <div class="header-meta">
-        <span class="meta-item">Tổ chức: <strong>TI Agentic SOC</strong></span>
-        <span class="meta-item">Kỳ báo cáo: <strong>{period_label}</strong></span>
-        <span class="meta-item">Người tạo: <strong>Threat Analyst</strong></span>
-        <span class="meta-item">Nền tảng: <strong>TI Agentic v1.0</strong></span>
-        <span class="meta-item">Thời gian: <strong>{now_vn.strftime('%d/%m/%Y %H:%M UTC+7')}</strong></span>
+        <span class="meta-item">Organization: <strong>TI Agentic SOC</strong></span>
+        <span class="meta-item">Report Period: <strong>{period_label}</strong></span>
+        <span class="meta-item">Author: <strong>Threat Analyst</strong></span>
+        <span class="meta-item">Platform: <strong>TI Agentic v1.0</strong></span>
+        <span class="meta-item">Generated: <strong>{now_vn.strftime('%d/%m/%Y %H:%M UTC+7')}</strong></span>
       </div>
     </div>
   </div>
@@ -894,7 +908,7 @@ def _gen_pdf_html(out_path, report_type, now_vn=None):
     <div class="section-head">
       <div class="section-stripe stripe-ioc"></div>
       <span class="section-title">Indicators of Compromise (IOC)</span>
-      <span class="section-count">{period_label} — {len(iocs_no_yara)} chỉ số</span>
+      <span class="section-count">{period_label} — {len(iocs_no_yara)} indicators</span>
     </div>
     <div class="table-wrap">
       <table class="ioc-table">
@@ -902,12 +916,12 @@ def _gen_pdf_html(out_path, report_type, now_vn=None):
         <thead>
           <tr>
             <th>IOC</th>
-            <th>Loại</th>
-            <th>Điểm</th>
-            <th>Mức Độ</th>
-            <th>Ngày tạo</th>
+            <th>Type</th>
+            <th>Score</th>
+            <th>Risk Level</th>
+            <th>Created</th>
             <th>Valid From</th>
-            <th>Mô tả</th>
+            <th>Description</th>
           </tr>
         </thead>
         <tbody>
@@ -929,7 +943,7 @@ def _gen_pdf_html(out_path, report_type, now_vn=None):
 """
 
     if not iocs_no_yara:
-        html += f"""          <tr><td colspan="7" style="text-align:center;">Không có dữ liệu cho {period_label}</td></tr>
+        html += f"""          <tr><td colspan="7" style="text-align:center;">No data for {period_label}</td></tr>
 """
 
     html += """        </tbody>
@@ -942,7 +956,7 @@ def _gen_pdf_html(out_path, report_type, now_vn=None):
     <div class="section-head">
       <div class="section-stripe stripe-yara"></div>
       <span class="section-title">Yara Rules</span>
-      <span class="section-count">{period_label} — {count_yara} quy tắc</span>
+      <span class="section-count">{period_label} — {len(yara_rules)} rules</span>
     </div>
     <div class="table-wrap">
       <table class="yara-table">
@@ -951,8 +965,8 @@ def _gen_pdf_html(out_path, report_type, now_vn=None):
           <tr>
             <th>Rule Name</th>
             <th>Pattern</th>
-            <th>Điểm</th>
-            <th>Mức Độ</th>
+            <th>Score</th>
+            <th>Risk Level</th>
             <th>Valid From</th>
           </tr>
         </thead>
@@ -973,10 +987,8 @@ def _gen_pdf_html(out_path, report_type, now_vn=None):
 """
 
     if not yara_rules:
-        html += f"""          <tr><td colspan="5" style="text-align:center;">Không có dữ liệu cho {period_label}</td></tr>
+        html += f"""          <tr><td colspan="5" style="text-align:center;">No data for {period_label}</td></tr>
 """
-
-    html = html.replace("{count_yara}", str(len(yara_rules)))
 
     html += """        </tbody>
       </table>
@@ -988,20 +1000,20 @@ def _gen_pdf_html(out_path, report_type, now_vn=None):
     <div class="section-head">
       <div class="section-stripe stripe-malware"></div>
       <span class="section-title">Malware Families</span>
-      <span class="section-count">{period_label} — {count_mal} gia đình</span>
+      <span class="section-count">{period_label} — {len(mals)} families</span>
     </div>
     <div class="table-wrap">
       <table class="mal-table">
         <colgroup><col><col><col><col><col><col><col></colgroup>
         <thead>
           <tr>
-            <th>Tên</th>
-            <th>Loại</th>
-            <th>Mức Độ</th>
+            <th>Name</th>
+            <th>Type</th>
+            <th>Severity</th>
             <th>Aliases</th>
             <th>Confidence</th>
             <th>First Seen</th>
-            <th>Mô tả</th>
+            <th>Description</th>
           </tr>
         </thead>
         <tbody>
@@ -1024,10 +1036,8 @@ def _gen_pdf_html(out_path, report_type, now_vn=None):
 """
 
     if not mals:
-        html += f"""          <tr><td colspan="7" style="text-align:center;">Không có dữ liệu cho {period_label}</td></tr>
+        html += f"""          <tr><td colspan="7" style="text-align:center;">No data for {period_label}</td></tr>
 """
-
-    html = html.replace("{count_mal}", str(len(mals)))
 
     html += """        </tbody>
       </table>
@@ -1039,7 +1049,7 @@ def _gen_pdf_html(out_path, report_type, now_vn=None):
     <div class="section-head">
       <div class="section-stripe stripe-vuln"></div>
       <span class="section-title">Vulnerabilities (CVE)</span>
-      <span class="section-count">{period_label} — {count_vuln} lỗ hổng</span>
+      <span class="section-count">{period_label} — {len(vulns)} vulnerabilities</span>
     </div>
     <div class="table-wrap">
       <table class="vuln-table">
@@ -1048,13 +1058,13 @@ def _gen_pdf_html(out_path, report_type, now_vn=None):
           <tr>
             <th>CVE ID</th>
             <th>CVSS</th>
-            <th>Mức Độ</th>
+            <th>Severity</th>
             <th>Vector</th>
             <th>Complexity</th>
             <th>CWE</th>
             <th>CISA Exploit</th>
             <th>Published</th>
-            <th>Mô tả</th>
+            <th>Description</th>
           </tr>
         </thead>
         <tbody>
@@ -1081,10 +1091,8 @@ def _gen_pdf_html(out_path, report_type, now_vn=None):
 """
 
     if not vulns:
-        html += f"""          <tr><td colspan="9" style="text-align:center;">Không có dữ liệu cho {period_label}</td></tr>
+        html += f"""          <tr><td colspan="9" style="text-align:center;">No data for {period_label}</td></tr>
 """
-
-    html = html.replace("{count_vuln}", str(len(vulns)))
 
     html += """        </tbody>
       </table>
@@ -1112,23 +1120,13 @@ def _gen_pdf_html(out_path, report_type, now_vn=None):
         with open('reports/debug_newcode.txt', 'w') as f:
             f.write(f"New code executed at {now_vn.isoformat()}\nHTML written to {html_path}\n")
 
-        # Try to convert HTML to PDF using pdfkit
+        # Convert HTML to PDF using weasyprint
         try:
-            import pdfkit
-            options = {
-                'page-size': 'A4',
-                'margin-top': '0.75in',
-                'margin-right': '0.75in',
-                'margin-bottom': '0.75in',
-                'margin-left': '0.75in',
-                'encoding': 'UTF-8',
-                'quiet': ''
-            }
-            pdfkit.from_file(html_path, out_path, options=options)
-            print(f"PDF generated: {out_path}")
-        except:
-            # If pdfkit fails, just keep HTML as fallback
-            print(f"PDF conversion failed, keeping HTML: {html_path}")
+            from weasyprint import HTML
+            HTML(html_path).write_pdf(out_path)
+            print(f"PDF generated with weasyprint: {out_path}")
+        except Exception as e:
+            print(f"PDF conversion failed: {e}, using HTML: {html_path}")
 
         return f"Report: {len(iocs_no_yara)} IOCs, {len(vulns)} CVEs, {len(mals)} Malware ({period_label})"
     except Exception as e:
@@ -1263,4 +1261,6 @@ if os.path.exists("frontend"):
 
 if __name__=="__main__":
     import uvicorn
-    uvicorn.run(app,host="0.0.0.0",port=8002,reload=False)
+    import sys
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8002
+    uvicorn.run(app,host="0.0.0.0",port=port,reload=False)
