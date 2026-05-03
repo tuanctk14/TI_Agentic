@@ -177,7 +177,7 @@ MIT License - see LICENSE file for details
 
 ## 👤 Author
 
-**Hoang Tuan** (tuanctk14)
+**Manh Tuan** (tuanctk14)
 - GitHub: [@tuanctk14](https://github.com/tuanctk14)
 - Email: tuanctk14@gmail.com
 
