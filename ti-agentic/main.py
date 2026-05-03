@@ -727,7 +727,7 @@ async def download_report(file: str = Query(...)):
     )
 
 def _gen_pdf_html(out_path, report_type, now_vn=None):
-    """Generate PDF report using HTML (all English to avoid encoding issues)"""
+    """Generate PDF report using HTML - Full English, no encoding issues"""
     import pdfkit
 
     if now_vn is None:
@@ -753,6 +753,7 @@ def _gen_pdf_html(out_path, report_type, now_vn=None):
         return True
 
     iocs = [i for i in store["iocs"] if in_period(i)]
+    yara_rules = [i for i in iocs if i.get("ioc_type") == "Yara"]
     mals = [m for m in store["malwares"] if in_period(m)]
     vulns = [v for v in store["vulnerabilities"] if in_period(v)]
     matches = [m for m in store["matches"] if in_period(m)]
@@ -769,152 +770,161 @@ def _gen_pdf_html(out_path, report_type, now_vn=None):
         "monthly": "MONTHLY"
     }.get(report_type, "PERIODIC")
 
-    # Build HTML
-    html = f"""
-    <html>
-    <head>
-        <meta charset="UTF-8">
-        <style>
-            body {{ font-family: Arial, sans-serif; margin: 20px; color: #333; }}
-            h1 {{ text-align: center; color: #1a237e; font-size: 24px; margin-bottom: 10px; }}
-            h2 {{ color: #1a237e; font-size: 16px; margin-top: 20px; border-bottom: 2px solid #1a237e; padding-bottom: 5px; }}
-            .meta {{ text-align: center; font-size: 12px; color: #666; margin-bottom: 20px; }}
-            table {{ width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 11px; }}
-            th {{ background-color: #1a237e; color: white; padding: 8px; text-align: left; font-weight: bold; }}
-            td {{ padding: 6px 8px; border-bottom: 1px solid #ddd; }}
-            tr:nth-child(even) {{ background-color: #f5f5f5; }}
-            .critical {{ color: #b71c1c; font-weight: bold; }}
-            .high {{ color: #e65100; font-weight: bold; }}
-            .medium {{ color: #f57f17; }}
-            .low {{ color: #2e7d32; }}
-            .footer {{ margin-top: 30px; padding-top: 10px; border-top: 1px solid #ddd; text-align: center; font-size: 9px; color: #999; }}
-        </style>
-    </head>
-    <body>
-        <h1>THREAT INTELLIGENCE REPORT {type_label}</h1>
-        <div class="meta">
-            Period: {period_label} | Generated: {now_vn.strftime('%d/%m/%Y %H:%M:%S')} (UTC+7) | Source: {store.get('source', '?')}
-        </div>
+    # Build HTML - fully ASCII/English to avoid encoding issues
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <style>
+        * {{ box-sizing: border-box; }}
+        body {{ font-family: Helvetica, Arial, sans-serif; margin: 15px; color: #333; background: white; }}
+        h1 {{ text-align: center; color: #1a3a52; font-size: 22px; margin: 0 0 5px 0; }}
+        h2 {{ color: #1a3a52; font-size: 14px; margin: 15px 0 8px 0; border-bottom: 2px solid #1a3a52; padding-bottom: 5px; }}
+        .header {{ text-align: center; font-size: 10px; color: #666; margin-bottom: 15px; }}
+        table {{ width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 10px; }}
+        th {{ background-color: #1a3a52; color: white; padding: 6px; text-align: left; font-weight: bold; border: 1px solid #000; }}
+        td {{ padding: 5px 6px; border: 1px solid #ddd; }}
+        tr:nth-child(even) {{ background-color: #f8f8f8; }}
+        .critical {{ background-color: #ffcccc; font-weight: bold; }}
+        .high {{ background-color: #ffe6cc; font-weight: bold; }}
+        .medium {{ background-color: #ffffcc; }}
+        .low {{ background-color: #ccffcc; }}
+        .footer {{ margin-top: 20px; padding-top: 8px; border-top: 1px solid #ccc; text-align: center; font-size: 8px; color: #999; }}
+        .page-break {{ page-break-after: always; }}
+    </style>
+</head>
+<body>
+    <h1>THREAT INTELLIGENCE REPORT - {type_label}</h1>
+    <div class="header">
+        Period: {period_label} | Generated: {now_vn.strftime('%d/%m/%Y %H:%M:%S')} UTC+7 | Source: OpenCTI
+    </div>
 
-        <h2>1. EXECUTIVE SUMMARY</h2>
-        <table>
-            <tr>
-                <th>Metric</th><th>Value</th><th>Metric</th><th>Value</th>
-            </tr>
-            <tr>
-                <td>Total IOCs</td><td>{len(iocs)}</td><td>Critical IOCs</td><td>{sum(1 for i in iocs if i.get('risk_level')=='critical')}</td>
-            </tr>
-            <tr>
-                <td>False Positives</td><td>{sum(1 for i in iocs if i.get('is_false_positive'))}</td><td>High IOCs</td><td>{sum(1 for i in iocs if i.get('risk_level')=='high')}</td>
-            </tr>
-            <tr>
-                <td>Malware Families</td><td>{len(mals)}</td><td>Critical CVEs</td><td>{sum(1 for v in vulns if v.get('severity')=='critical')}</td>
-            </tr>
-            <tr>
-                <td>Affected Devices</td><td>{len(set(m['asset_hostname'] for m in matches if 'asset_hostname' in m))}</td><td>Total Matches</td><td>{len(matches)}</td>
-            </tr>
-        </table>
-
-        <h2>2. HIGH-RISK IOCs — {len([i for i in iocs if i.get('risk_level') in ('critical', 'high')])} items ({period_label})</h2>
-        <table>
-            <tr>
-                <th>Indicator</th><th>Type</th><th>Severity</th><th>Confidence</th><th>Created</th><th>Reason</th>
-            </tr>
+    <h2>1. INDICATORS OF COMPROMISE (IOCs)</h2>
+    <table>
+        <tr>
+            <th>Indicator</th><th>Type</th><th>Score</th><th>Risk Level</th><th>Confidence</th><th>Valid From</th><th>Reason</th>
+        </tr>
     """
 
-    danger = [i for i in iocs if i.get("risk_level") in ("critical", "high")]
-    for i in danger[:35]:
-        severity_class = i.get("risk_level", "").lower()
-        html += f"""
-            <tr>
-                <td>{i.get('name', '?')[:60]}</td>
-                <td>{i.get('ioc_type', '?')}</td>
-                <td class="{severity_class}">{i.get('risk_level', '?').upper()}</td>
-                <td>{i.get('confidence', 0)}%</td>
-                <td>{str(i.get('created_at', ''))[:10]}</td>
-                <td>{i.get('reason', '')[:70]}</td>
-            </tr>
-        """
+    iocs_to_show = [i for i in iocs if i.get("ioc_type") != "Yara"][:30]
+    for i in iocs_to_show:
+        risk_class = i.get("risk_level", "low").lower()
+        html += f"""        <tr>
+            <td>{i.get('name', 'N/A')[:50]}</td>
+            <td>{i.get('ioc_type', 'N/A')}</td>
+            <td>{i.get('score', 0)}</td>
+            <td class="{risk_class}">{i.get('risk_level', 'N/A').upper()}</td>
+            <td>{i.get('confidence', 0)}%</td>
+            <td>{str(i.get('valid_from', ''))[:10]}</td>
+            <td>{i.get('reason', 'N/A')[:40]}</td>
+        </tr>
+"""
 
-    html += """
-        </table>
+    html += """    </table>
 
-        <h2>3. VULNERABILITIES — """ + str(len(vulns)) + """ items (""" + period_label + """)</h2>
-        <table>
-            <tr>
-                <th>CVE</th><th>CVSS</th><th>Severity</th><th>Affected Software</th><th>Patched</th><th>Published</th><th>Description</th>
-            </tr>
+    <h2>2. YARA RULES</h2>
+    <table>
+        <tr>
+            <th>Rule Name</th><th>Pattern</th><th>Score</th><th>Risk Level</th><th>Valid From</th>
+        </tr>
     """
 
-    for v in vulns[:25]:
-        severity_class = (v.get("severity") or "").lower()
-        html += f"""
-            <tr>
-                <td><b>{v.get('name', '?')}</b></td>
-                <td class="{severity_class}">{v.get('cvss_score', '?')}</td>
-                <td class="{severity_class}">{v.get('severity', '?').upper()}</td>
-                <td>{v.get('affected_software', '?')}</td>
-                <td>{"Co" if v.get('patch_available') else "Chua"}</td>
-                <td>{str(v.get('created_at', ''))[:10]}</td>
-                <td>{v.get('description', '')[:70]}</td>
-            </tr>
-        """
+    for y in yara_rules[:20]:
+        risk_class = y.get("risk_level", "low").lower()
+        pattern = y.get("pattern", "")
+        if pattern:
+            pattern = pattern[:40] + "..." if len(pattern) > 40 else pattern
+        html += f"""        <tr>
+            <td>{y.get('name', 'N/A')[:40]}</td>
+            <td>{pattern}</td>
+            <td>{y.get('score', 0)}</td>
+            <td class="{risk_class}">{y.get('risk_level', 'N/A').upper()}</td>
+            <td>{str(y.get('valid_from', ''))[:10]}</td>
+        </tr>
+"""
 
-    html += """
-        </table>
+    html += f"""    </table>
 
-        <h2>4. MALWARE — """ + str(len(mals)) + """ families (""" + period_label + """)</h2>
-        <table>
-            <tr>
-                <th>Name</th><th>Type</th><th>Severity</th><th>Created</th><th>Modified</th><th>Description</th>
-            </tr>
+    <h2>3. MALWARE</h2>
+    <table>
+        <tr>
+            <th>Name</th><th>Aliases</th><th>Types</th><th>Severity</th><th>Confidence</th><th>First Seen</th><th>Intrusion Sets</th>
+        </tr>
     """
 
     for m in mals[:20]:
-        severity_class = (m.get("severity") or "").lower()
-        html += f"""
-            <tr>
-                <td><b>{m.get('name', '?')}</b></td>
-                <td>{", ".join(m.get('malware_types', []))[:25]}</td>
-                <td class="{severity_class}">{m.get('severity', '?').upper()}</td>
-                <td>{str(m.get('created_at', ''))[:10]}</td>
-                <td>{str(m.get('modified', ''))[:10]}</td>
-                <td>{m.get('description', '')[:90]}</td>
-            </tr>
-        """
+        severity_class = (m.get("severity") or "low").lower()
+        aliases = ", ".join(m.get('aliases', [])[:2]) if m.get('aliases') else "N/A"
+        types = ", ".join(m.get('malware_types', [])[:2]) if m.get('malware_types') else "N/A"
+        intrusion = ", ".join(m.get('intrusion_sets', [])[:1]) if m.get('intrusion_sets') else "N/A"
+        html += f"""        <tr>
+            <td>{m.get('name', 'N/A')}</td>
+            <td>{aliases[:30]}</td>
+            <td>{types}</td>
+            <td class="{severity_class}">{m.get('severity', 'N/A').upper()}</td>
+            <td>{m.get('confidence', 0)}%</td>
+            <td>{str(m.get('first_seen', ''))[:10]}</td>
+            <td>{intrusion}</td>
+        </tr>
+"""
 
-    html += """
-        </table>
+    html += f"""    </table>
 
-        <h2>5. AFFECTED DEVICES — """ + str(len([m for m in matches if m.get("risk_level") in ("critical", "high")])) + """ items</h2>
-        <table>
-            <tr>
-                <th>Device Name</th><th>IP Address</th><th>Threat Name</th><th>Type</th><th>Severity</th><th>Recommendation</th>
-            </tr>
+    <h2>4. VULNERABILITIES (CVEs)</h2>
+    <table>
+        <tr>
+            <th>CVE ID</th><th>CVSS Score</th><th>Severity</th><th>Attack Vector</th><th>Complexity</th><th>CWE</th><th>CISA Exploit</th><th>Published</th>
+        </tr>
     """
 
-    crit_m = [m for m in matches if m.get("risk_level") in ("critical", "high")]
-    for m in crit_m[:25]:
-        severity_class = (m.get("risk_level") or "").lower()
-        html += f"""
-            <tr>
-                <td><b>{m.get('asset_hostname', '?')}</b></td>
-                <td>{m.get('asset_ip', '?')}</td>
-                <td>{m.get('threat_name', '?')[:60]}</td>
-                <td>{m.get('match_type', '?')}</td>
-                <td class="{severity_class}">{m.get('risk_level', '?').upper()}</td>
-                <td>{m.get('recommendation', '')[:70]}</td>
-            </tr>
-        """
+    for v in vulns[:25]:
+        severity_class = (v.get("severity") or "low").lower()
+        cwe = ", ".join(v.get('weaknesses', [])[:1]) if v.get('weaknesses') else "N/A"
+        cisa = "Yes" if v.get('cisa_exploit_add') else "No"
+        html += f"""        <tr>
+            <td><b>{v.get('name', 'N/A')}</b></td>
+            <td class="{severity_class}">{v.get('cvss_v3_score', v.get('cvss_score', 'N/A'))}</td>
+            <td class="{severity_class}">{v.get('cvss_v3_severity', v.get('severity', 'N/A')).upper()}</td>
+            <td>{v.get('attack_vector', 'N/A')}</td>
+            <td>{v.get('attack_complexity', 'N/A')}</td>
+            <td>{cwe}</td>
+            <td>{cisa}</td>
+            <td>{str(v.get('published', ''))[:10]}</td>
+        </tr>
+"""
 
-    html += f"""
-        </table>
+    html += f"""    </table>
 
-        <div class="footer">
-            Auto-generated by TI Agentic | {now_vn.strftime('%d/%m/%Y %H:%M:%S')} (UTC+7) | Period: {period_label}
-        </div>
-    </body>
-    </html>
+    <h2>5. ASSETS MATCHING</h2>
+    <table>
+        <tr>
+            <th>Device Name</th><th>IP Address</th><th>Department</th><th>User</th><th>Threat</th><th>Type</th><th>Risk</th><th>Recommendation</th>
+        </tr>
+    """
+
+    for m in matches[:30]:
+        risk_class = (m.get("risk_level") or "low").lower()
+        html += f"""        <tr>
+            <td>{m.get('asset_hostname', 'N/A')}</td>
+            <td>{m.get('asset_ip', 'N/A')}</td>
+            <td>{m.get('asset_dept', 'N/A')[:20]}</td>
+            <td>{m.get('asset_user', 'N/A')[:25]}</td>
+            <td>{m.get('threat_name', 'N/A')[:30]}</td>
+            <td>{m.get('match_type', 'N/A')}</td>
+            <td class="{risk_class}">{m.get('risk_level', 'N/A').upper()}</td>
+            <td>{m.get('recommendation', 'N/A')[:40]}</td>
+        </tr>
+"""
+
+    html += f"""    </table>
+
+    <div class="footer">
+        <p>Auto-generated by TI Agentic Threat Intelligence Platform</p>
+        <p>Report generated: {now_vn.strftime('%Y-%m-%d %H:%M:%S')} UTC+7 | Period: {period_label}</p>
+    </div>
+</body>
+</html>
     """
 
     # Convert HTML to PDF
