@@ -727,7 +727,7 @@ async def download_report(file: str = Query(...)):
     )
 
 def _gen_pdf_html(out_path, report_type, now_vn=None):
-    """Generate PDF report using HTML (better Vietnamese support)"""
+    """Generate PDF report using HTML (all English to avoid encoding issues)"""
     import pdfkit
 
     if now_vn is None:
@@ -758,16 +758,16 @@ def _gen_pdf_html(out_path, report_type, now_vn=None):
     matches = [m for m in store["matches"] if in_period(m)]
 
     period_label = {
-        "daily": f"ngay {now_vn.strftime('%d/%m/%Y')}",
-        "weekly": f"tuan tu {week_start}",
-        "monthly": f"thang {now_vn.strftime('%m/%Y')}",
+        "daily": f"on {now_vn.strftime('%d/%m/%Y')}",
+        "weekly": f"week starting {week_start}",
+        "monthly": f"month {now_vn.strftime('%m/%Y')}",
     }.get(report_type, "")
 
     type_label = {
-        "daily": "HANG NGAY",
-        "weekly": "HANG TUAN",
-        "monthly": "HANG THANG"
-    }.get(report_type, "DINH KY")
+        "daily": "DAILY",
+        "weekly": "WEEKLY",
+        "monthly": "MONTHLY"
+    }.get(report_type, "PERIODIC")
 
     # Build HTML
     html = f"""
@@ -791,34 +791,34 @@ def _gen_pdf_html(out_path, report_type, now_vn=None):
         </style>
     </head>
     <body>
-        <h1>BAO CAO THREAT INTELLIGENCE {type_label}</h1>
+        <h1>THREAT INTELLIGENCE REPORT {type_label}</h1>
         <div class="meta">
-            Ky: {period_label} | Tao luc: {now_vn.strftime('%d/%m/%Y %H:%M:%S')} (UTC+7) | Nguon: {store.get('source', '?')}
+            Period: {period_label} | Generated: {now_vn.strftime('%d/%m/%Y %H:%M:%S')} (UTC+7) | Source: {store.get('source', '?')}
         </div>
 
-        <h2>1. TONG QUAN</h2>
+        <h2>1. EXECUTIVE SUMMARY</h2>
         <table>
             <tr>
-                <th>Chi so</th><th>Gia tri</th><th>Chi so</th><th>Gia tri</th>
+                <th>Metric</th><th>Value</th><th>Metric</th><th>Value</th>
             </tr>
             <tr>
-                <td>Tong IOC</td><td>{len(iocs)}</td><td>Critical</td><td>{sum(1 for i in iocs if i.get('risk_level')=='critical')}</td>
+                <td>Total IOCs</td><td>{len(iocs)}</td><td>Critical IOCs</td><td>{sum(1 for i in iocs if i.get('risk_level')=='critical')}</td>
             </tr>
             <tr>
-                <td>False Positive</td><td>{sum(1 for i in iocs if i.get('is_false_positive'))}</td><td>High</td><td>{sum(1 for i in iocs if i.get('risk_level')=='high')}</td>
+                <td>False Positives</td><td>{sum(1 for i in iocs if i.get('is_false_positive'))}</td><td>High IOCs</td><td>{sum(1 for i in iocs if i.get('risk_level')=='high')}</td>
             </tr>
             <tr>
-                <td>Malware</td><td>{len(mals)}</td><td>CVE Critical</td><td>{sum(1 for v in vulns if v.get('severity')=='critical')}</td>
+                <td>Malware Families</td><td>{len(mals)}</td><td>Critical CVEs</td><td>{sum(1 for v in vulns if v.get('severity')=='critical')}</td>
             </tr>
             <tr>
-                <td>Thiet bi anh huong</td><td>{len(set(m['asset_hostname'] for m in matches if 'asset_hostname' in m))}</td><td>Tong matches</td><td>{len(matches)}</td>
+                <td>Affected Devices</td><td>{len(set(m['asset_hostname'] for m in matches if 'asset_hostname' in m))}</td><td>Total Matches</td><td>{len(matches)}</td>
             </tr>
         </table>
 
-        <h2>2. IOC NGUY HIEM — {len([i for i in iocs if i.get('risk_level') in ('critical', 'high')])} muc ({period_label})</h2>
+        <h2>2. HIGH-RISK IOCs — {len([i for i in iocs if i.get('risk_level') in ('critical', 'high')])} items ({period_label})</h2>
         <table>
             <tr>
-                <th>IOC</th><th>Loai</th><th>Muc do</th><th>Conf.</th><th>Ngay tao</th><th>Ly do</th>
+                <th>Indicator</th><th>Type</th><th>Severity</th><th>Confidence</th><th>Created</th><th>Reason</th>
             </tr>
     """
 
@@ -839,10 +839,10 @@ def _gen_pdf_html(out_path, report_type, now_vn=None):
     html += """
         </table>
 
-        <h2>3. LO HONG — """ + str(len(vulns)) + """ muc (""" + period_label + """)</h2>
+        <h2>3. VULNERABILITIES — """ + str(len(vulns)) + """ items (""" + period_label + """)</h2>
         <table>
             <tr>
-                <th>CVE</th><th>CVSS</th><th>Muc do</th><th>Phan mem</th><th>Patch</th><th>Ngay tao</th><th>Mo ta</th>
+                <th>CVE</th><th>CVSS</th><th>Severity</th><th>Affected Software</th><th>Patched</th><th>Published</th><th>Description</th>
             </tr>
     """
 
@@ -863,10 +863,10 @@ def _gen_pdf_html(out_path, report_type, now_vn=None):
     html += """
         </table>
 
-        <h2>4. MALWARE — """ + str(len(mals)) + """ muc (""" + period_label + """)</h2>
+        <h2>4. MALWARE — """ + str(len(mals)) + """ families (""" + period_label + """)</h2>
         <table>
             <tr>
-                <th>Ten</th><th>Loai</th><th>Muc do</th><th>Ngay tao</th><th>Ngay chinh sua</th><th>Mo ta</th>
+                <th>Name</th><th>Type</th><th>Severity</th><th>Created</th><th>Modified</th><th>Description</th>
             </tr>
     """
 
@@ -886,10 +886,10 @@ def _gen_pdf_html(out_path, report_type, now_vn=None):
     html += """
         </table>
 
-        <h2>5. THIET BI BI ANH HUONG — """ + str(len([m for m in matches if m.get("risk_level") in ("critical", "high")])) + """ muc</h2>
+        <h2>5. AFFECTED DEVICES — """ + str(len([m for m in matches if m.get("risk_level") in ("critical", "high")])) + """ items</h2>
         <table>
             <tr>
-                <th>Thiet bi</th><th>IP</th><th>Moi de doa</th><th>Loai</th><th>Muc do</th><th>Hanh dong</th>
+                <th>Device Name</th><th>IP Address</th><th>Threat Name</th><th>Type</th><th>Severity</th><th>Recommendation</th>
             </tr>
     """
 
@@ -911,7 +911,7 @@ def _gen_pdf_html(out_path, report_type, now_vn=None):
         </table>
 
         <div class="footer">
-            Bao cao tu dong boi TI Agentic | {now_vn.strftime('%d/%m/%Y %H:%M:%S')} (UTC+7) | Ky: {period_label}
+            Auto-generated by TI Agentic | {now_vn.strftime('%d/%m/%Y %H:%M:%S')} (UTC+7) | Period: {period_label}
         </div>
     </body>
     </html>
