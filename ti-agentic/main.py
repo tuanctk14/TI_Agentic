@@ -703,7 +703,6 @@ async def create_report(type: str = "daily"):
     now_vn    = datetime.now(VN_TZ)
     date_str  = now_vn.strftime("%Y-%m-%d_%H%M")
     pdf_path  = f"reports/{type}_report_{date_str}.pdf"
-    # Try HTML-based PDF first (better Vietnamese support)
     count_info = _gen_pdf_html(pdf_path, type, now_vn)
     return {"status":"ok","message":f"Bao cao PDF da tao: {pdf_path}","file":pdf_path,"count_info":count_info}
 
@@ -727,9 +726,7 @@ async def download_report(file: str = Query(...)):
     )
 
 def _gen_pdf_html(out_path, report_type, now_vn=None):
-    """Generate PDF report using HTML - Full English, no encoding issues"""
-    import pdfkit
-
+    """Generate PDF from HTML template using the professional threat-intelligence-report.html design"""
     if now_vn is None:
         now_vn = datetime.now(VN_TZ)
 
@@ -754,404 +751,389 @@ def _gen_pdf_html(out_path, report_type, now_vn=None):
 
     iocs = [i for i in store["iocs"] if in_period(i)]
     yara_rules = [i for i in iocs if i.get("ioc_type") == "Yara"]
+    iocs_no_yara = [i for i in iocs if i.get("ioc_type") != "Yara"]
     mals = [m for m in store["malwares"] if in_period(m)]
     vulns = [v for v in store["vulnerabilities"] if in_period(v)]
     matches = [m for m in store["matches"] if in_period(m)]
 
     period_label = {
-        "daily": f"on {now_vn.strftime('%d/%m/%Y')}",
-        "weekly": f"week starting {week_start}",
-        "monthly": f"month {now_vn.strftime('%m/%Y')}",
+        "daily": f"Ngày — {now_vn.strftime('%d/%m/%Y')}",
+        "weekly": f"Tuần từ {week_start}",
+        "monthly": f"Tháng — {now_vn.strftime('%m/%Y')}",
     }.get(report_type, "")
 
-    type_label = {
-        "daily": "DAILY",
-        "weekly": "WEEKLY",
-        "monthly": "MONTHLY"
-    }.get(report_type, "PERIODIC")
-
-    # Build HTML - fully ASCII/English to avoid encoding issues
-    html = f"""<!DOCTYPE html>
-<html>
+    # Build HTML from template
+    html = """<!DOCTYPE html>
+<html lang="vi">
 <head>
-    <meta charset="UTF-8">
-    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
-    <style>
-        * {{ box-sizing: border-box; }}
-        body {{ font-family: Helvetica, Arial, sans-serif; margin: 15px; color: #333; background: white; }}
-        h1 {{ text-align: center; color: #1a3a52; font-size: 22px; margin: 0 0 5px 0; }}
-        h2 {{ color: #1a3a52; font-size: 14px; margin: 15px 0 8px 0; border-bottom: 2px solid #1a3a52; padding-bottom: 5px; }}
-        .header {{ text-align: center; font-size: 10px; color: #666; margin-bottom: 15px; }}
-        table {{ width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 10px; }}
-        th {{ background-color: #1a3a52; color: white; padding: 6px; text-align: left; font-weight: bold; border: 1px solid #000; }}
-        td {{ padding: 5px 6px; border: 1px solid #ddd; }}
-        tr:nth-child(even) {{ background-color: #f8f8f8; }}
-        .critical {{ background-color: #ffcccc; font-weight: bold; }}
-        .high {{ background-color: #ffe6cc; font-weight: bold; }}
-        .medium {{ background-color: #ffffcc; }}
-        .low {{ background-color: #ccffcc; }}
-        .footer {{ margin-top: 20px; padding-top: 8px; border-top: 1px solid #ccc; text-align: center; font-size: 8px; color: #999; }}
-        .page-break {{ page-break-after: always; }}
-    </style>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Threat Intelligence Report</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #1a1a1a; background: #fff; line-height: 1.5; }
+  .page { width: 297mm; min-height: 210mm; margin: 0 auto; padding: 12mm 14mm; background: #fff; }
+  @media print { @page { size: A4; margin: 10mm; } body { background: #fff; } .page { width: 100%; padding: 0; margin: 0; } .no-print { display: none !important; } }
+  .report-header { display: flex; align-items: stretch; gap: 0; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 6px; overflow: hidden; }
+  .header-accent { width: 5px; background: #C0392B; flex-shrink: 0; }
+  .header-body { flex: 1; padding: 9px 12px; background: #f8f8f8; }
+  .header-top { display: flex; justify-content: space-between; align-items: flex-start; }
+  .report-title { font-size: 16px; font-weight: 700; color: #1a1a1a; letter-spacing: -0.02em; }
+  .report-subtitle { font-size: 10px; color: #666; margin-top: 1px; }
+  .tlp-badge { background: #e67e22; color: #fff; font-size: 9px; font-weight: 700; padding: 3px 9px; border-radius: 3px; letter-spacing: 0.08em; white-space: nowrap; }
+  .header-meta { display: flex; gap: 20px; margin-top: 7px; flex-wrap: wrap; }
+  .meta-item { font-size: 10px; color: #555; }
+  .meta-item strong { color: #1a1a1a; font-weight: 600; }
+  .summary-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 10px; }
+  .sum-card { border: 1px solid #e0e0e0; border-radius: 6px; padding: 8px 10px; background: #fafafa; display: flex; align-items: center; gap: 10px; }
+  .sum-icon { width: 8px; height: 32px; border-radius: 4px; flex-shrink: 0; }
+  .icon-ioc { background: #2980b9; }
+  .icon-yara { background: #27ae60; }
+  .icon-malware { background: #C0392B; }
+  .icon-vuln { background: #d68910; }
+  .sum-num { font-size: 20px; font-weight: 700; line-height: 1; }
+  .num-ioc { color: #2980b9; }
+  .num-yara { color: #27ae60; }
+  .num-mal { color: #C0392B; }
+  .num-vuln { color: #d68910; }
+  .sum-lbl { font-size: 9px; color: #888; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; margin-top: 2px; }
+  .section { margin-bottom: 12px; }
+  .section-head { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; padding-bottom: 4px; border-bottom: 2px solid #f0f0f0; }
+  .section-stripe { width: 4px; height: 16px; border-radius: 2px; }
+  .stripe-ioc { background: #2980b9; }
+  .stripe-yara { background: #27ae60; }
+  .stripe-malware { background: #C0392B; }
+  .stripe-vuln { background: #d68910; }
+  .section-title { font-size: 11px; font-weight: 700; color: #1a1a1a; text-transform: uppercase; letter-spacing: 0.07em; }
+  .section-count { font-size: 9px; color: #888; background: #f0f0f0; border: 1px solid #e0e0e0; padding: 1px 7px; border-radius: 10px; }
+  .table-wrap { border: 1px solid #ddd; border-radius: 5px; overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; font-size: 10px; table-layout: fixed; }
+  thead tr { background: #f2f2f2; }
+  th { padding: 5px 7px; text-align: left; font-weight: 700; font-size: 9px; color: #555; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #ddd; white-space: nowrap; }
+  td { padding: 5px 7px; color: #1a1a1a; border-bottom: 1px solid #ebebeb; vertical-align: top; word-wrap: break-word; overflow-wrap: break-word; }
+  tr:last-child td { border-bottom: none; }
+  tr:nth-child(even) td { background: #fafafa; }
+  .badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 9px; font-weight: 600; white-space: nowrap; letter-spacing: 0.02em; }
+  .b-ip { background: #d6eaf8; color: #1a5276; border: 1px solid #a9cce3; }
+  .b-domain { background: #d5f5e3; color: #1e8449; border: 1px solid #a9dfbf; }
+  .b-hash { background: #e8daef; color: #6c3483; border: 1px solid #d2b4de; }
+  .b-url { background: #fdebd0; color: #784212; border: 1px solid #f5cba7; }
+  .b-critical { background: #f1948a; color: #7b241c; border: 1px solid #e74c3c; }
+  .b-high { background: #fce4d6; color: #922b21; border: 1px solid #f1948a; }
+  .b-medium { background: #fdebd0; color: #784212; border: 1px solid #f5cba7; }
+  .b-low { background: #d5f5e3; color: #1e8449; border: 1px solid #a9dfbf; }
+  .score { font-family: 'Courier New', monospace; font-weight: 700; font-size: 10px; }
+  .score-h { color: #c0392b; }
+  .score-m { color: #d68910; }
+  .score-l { color: #27ae60; }
+  .mono { font-family: 'Courier New', monospace; font-size: 9.5px; color: #1a1a1a; }
+  .date { font-family: 'Courier New', monospace; font-size: 9px; color: #555; white-space: nowrap; }
+  .report-footer { margin-top: 10px; padding-top: 6px; border-top: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center; font-size: 9px; color: #888; }
+</style>
 </head>
 <body>
-    <h1>THREAT INTELLIGENCE REPORT - {type_label}</h1>
-    <div class="header">
-        Period: {period_label} | Generated: {now_vn.strftime('%d/%m/%Y %H:%M:%S')} UTC+7 | Source: OpenCTI
-    </div>
-
-    <h2>1. INDICATORS OF COMPROMISE (IOCs)</h2>
-    <table>
-        <tr>
-            <th>Indicator</th><th>Type</th><th>Score</th><th>Risk Level</th><th>Confidence</th><th>Valid From</th><th>Reason</th>
-        </tr>
-    """
-
-    iocs_to_show = [i for i in iocs if i.get("ioc_type") != "Yara"][:30]
-    for i in iocs_to_show:
-        risk_class = i.get("risk_level", "low").lower()
-        html += f"""        <tr>
-            <td>{i.get('name', 'N/A')[:50]}</td>
-            <td>{i.get('ioc_type', 'N/A')}</td>
-            <td>{i.get('score', 0)}</td>
-            <td class="{risk_class}">{i.get('risk_level', 'N/A').upper()}</td>
-            <td>{i.get('confidence', 0)}%</td>
-            <td>{str(i.get('valid_from', ''))[:10]}</td>
-            <td>{i.get('reason', 'N/A')[:40]}</td>
-        </tr>
+<div class="page">
 """
 
-    html += """    </table>
+    # Report Header
+    html += f"""
+  <div class="report-header">
+    <div class="header-accent"></div>
+    <div class="header-body">
+      <div class="header-top">
+        <div>
+          <div class="report-title">Threat Intelligence Report</div>
+          <div class="report-subtitle">Báo cáo tình báo mối đe dọa — Tổng hợp IOC · YARA · Malware · Vulnerability</div>
+        </div>
+        <span class="tlp-badge">TLP: AMBER</span>
+      </div>
+      <div class="header-meta">
+        <span class="meta-item">Tổ chức: <strong>TI Agentic SOC</strong></span>
+        <span class="meta-item">Kỳ báo cáo: <strong>{period_label}</strong></span>
+        <span class="meta-item">Người tạo: <strong>Threat Analyst</strong></span>
+        <span class="meta-item">Nền tảng: <strong>TI Agentic v1.0</strong></span>
+        <span class="meta-item">Thời gian: <strong>{now_vn.strftime('%d/%m/%Y %H:%M UTC+7')}</strong></span>
+      </div>
+    </div>
+  </div>
 
-    <h2>2. YARA RULES</h2>
-    <table>
-        <tr>
-            <th>Rule Name</th><th>Pattern</th><th>Score</th><th>Risk Level</th><th>Valid From</th>
-        </tr>
-    """
+  <!-- Summary Bar -->
+  <div class="summary-bar">
+    <div class="sum-card">
+      <div class="sum-icon icon-ioc"></div>
+      <div class="sum-content">
+        <div class="sum-num num-ioc">{len(iocs_no_yara)}</div>
+        <div class="sum-lbl">IOC</div>
+      </div>
+    </div>
+    <div class="sum-card">
+      <div class="sum-icon icon-yara"></div>
+      <div class="sum-content">
+        <div class="sum-num num-yara">{len(yara_rules)}</div>
+        <div class="sum-lbl">Yara Rules</div>
+      </div>
+    </div>
+    <div class="sum-card">
+      <div class="sum-icon icon-malware"></div>
+      <div class="sum-content">
+        <div class="sum-num num-mal">{len(mals)}</div>
+        <div class="sum-lbl">Malware</div>
+      </div>
+    </div>
+    <div class="sum-card">
+      <div class="sum-icon icon-vuln"></div>
+      <div class="sum-content">
+        <div class="sum-num num-vuln">{len(vulns)}</div>
+        <div class="sum-lbl">Vulnerabilities</div>
+      </div>
+    </div>
+  </div>
 
+  <!-- IOC Section -->
+  <div class="section">
+    <div class="section-head">
+      <div class="section-stripe stripe-ioc"></div>
+      <span class="section-title">Indicators of Compromise (IOC)</span>
+      <span class="section-count">{period_label} — {len(iocs_no_yara)} chỉ số</span>
+    </div>
+    <div class="table-wrap">
+      <table class="ioc-table">
+        <colgroup><col><col><col><col><col><col><col></colgroup>
+        <thead>
+          <tr>
+            <th>IOC</th>
+            <th>Loại</th>
+            <th>Điểm</th>
+            <th>Mức Độ</th>
+            <th>Ngày tạo</th>
+            <th>Valid From</th>
+            <th>Mô tả</th>
+          </tr>
+        </thead>
+        <tbody>
+"""
+
+    # Add IOC rows
+    for i in iocs_no_yara[:30]:
+        risk_color = "score-h" if i.get("risk_level") == "critical" else "score-m" if i.get("risk_level") == "high" else "score-l"
+        risk_class = "b-critical" if i.get("risk_level") == "critical" else "b-high" if i.get("risk_level") == "high" else "b-medium" if i.get("risk_level") == "medium" else "b-low"
+        html += f"""          <tr>
+            <td class="mono">{str(i.get('name', 'N/A'))[:40]}</td>
+            <td><span class="badge b-ip">{str(i.get('ioc_type', 'N/A'))}</span></td>
+            <td><span class="score {risk_color}">{i.get('score', 0)}</span></td>
+            <td><span class="badge {risk_class}">{str(i.get('risk_level', 'N/A')).upper()}</span></td>
+            <td class="date">{str(i.get('created_at', ''))[:10]}</td>
+            <td class="date">{str(i.get('valid_from', ''))[:10]}</td>
+            <td>{str(i.get('reason', 'N/A'))[:60]}</td>
+          </tr>
+"""
+
+    if not iocs_no_yara:
+        html += f"""          <tr><td colspan="7" style="text-align:center;">Không có dữ liệu cho {period_label}</td></tr>
+"""
+
+    html += """        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Yara Section -->
+  <div class="section">
+    <div class="section-head">
+      <div class="section-stripe stripe-yara"></div>
+      <span class="section-title">Yara Rules</span>
+      <span class="section-count">{period_label} — {count_yara} quy tắc</span>
+    </div>
+    <div class="table-wrap">
+      <table class="yara-table">
+        <colgroup><col><col><col><col><col></colgroup>
+        <thead>
+          <tr>
+            <th>Rule Name</th>
+            <th>Pattern</th>
+            <th>Điểm</th>
+            <th>Mức Độ</th>
+            <th>Valid From</th>
+          </tr>
+        </thead>
+        <tbody>
+"""
+
+    # Add Yara rows
     for y in yara_rules[:20]:
-        risk_class = y.get("risk_level", "low").lower()
-        pattern = y.get("pattern", "")
-        if pattern:
-            pattern = pattern[:40] + "..." if len(pattern) > 40 else pattern
-        html += f"""        <tr>
-            <td>{y.get('name', 'N/A')[:40]}</td>
-            <td>{pattern}</td>
-            <td>{y.get('score', 0)}</td>
-            <td class="{risk_class}">{y.get('risk_level', 'N/A').upper()}</td>
-            <td>{str(y.get('valid_from', ''))[:10]}</td>
-        </tr>
+        pattern = (y.get('pattern', '')[:50] + '...') if len(y.get('pattern', '')) > 50 else y.get('pattern', '')
+        risk_class = "b-critical" if y.get("risk_level") == "critical" else "b-high" if y.get("risk_level") == "high" else "b-medium" if y.get("risk_level") == "medium" else "b-low"
+        html += f"""          <tr>
+            <td><span class="mono">{str(y.get('name', 'N/A'))[:30]}</span></td>
+            <td><code style="font-size:8px;">{pattern}</code></td>
+            <td><span class="score">{y.get('score', 0)}</span></td>
+            <td><span class="badge {risk_class}">{str(y.get('risk_level', 'N/A')).upper()}</span></td>
+            <td class="date">{str(y.get('valid_from', ''))[:10]}</td>
+          </tr>
 """
 
-    html += f"""    </table>
-
-    <h2>3. MALWARE</h2>
-    <table>
-        <tr>
-            <th>Name</th><th>Aliases</th><th>Types</th><th>Severity</th><th>Confidence</th><th>First Seen</th><th>Intrusion Sets</th>
-        </tr>
-    """
-
-    for m in mals[:20]:
-        severity_class = (m.get("severity") or "low").lower()
-        aliases = ", ".join(m.get('aliases', [])[:2]) if m.get('aliases') else "N/A"
-        types = ", ".join(m.get('malware_types', [])[:2]) if m.get('malware_types') else "N/A"
-        intrusion = ", ".join(m.get('intrusion_sets', [])[:1]) if m.get('intrusion_sets') else "N/A"
-        html += f"""        <tr>
-            <td>{m.get('name', 'N/A')}</td>
-            <td>{aliases[:30]}</td>
-            <td>{types}</td>
-            <td class="{severity_class}">{m.get('severity', 'N/A').upper()}</td>
-            <td>{m.get('confidence', 0)}%</td>
-            <td>{str(m.get('first_seen', ''))[:10]}</td>
-            <td>{intrusion}</td>
-        </tr>
+    if not yara_rules:
+        html += f"""          <tr><td colspan="5" style="text-align:center;">Không có dữ liệu cho {period_label}</td></tr>
 """
 
-    html += f"""    </table>
+    html = html.replace("{count_yara}", str(len(yara_rules)))
 
-    <h2>4. VULNERABILITIES (CVEs)</h2>
-    <table>
-        <tr>
-            <th>CVE ID</th><th>CVSS Score</th><th>Severity</th><th>Attack Vector</th><th>Complexity</th><th>CWE</th><th>CISA Exploit</th><th>Published</th>
-        </tr>
-    """
-
-    for v in vulns[:25]:
-        severity_class = (v.get("severity") or "low").lower()
-        cwe = ", ".join(v.get('weaknesses', [])[:1]) if v.get('weaknesses') else "N/A"
-        cisa = "Yes" if v.get('cisa_exploit_add') else "No"
-        html += f"""        <tr>
-            <td><b>{v.get('name', 'N/A')}</b></td>
-            <td class="{severity_class}">{v.get('cvss_v3_score', v.get('cvss_score', 'N/A'))}</td>
-            <td class="{severity_class}">{v.get('cvss_v3_severity', v.get('severity', 'N/A')).upper()}</td>
-            <td>{v.get('attack_vector', 'N/A')}</td>
-            <td>{v.get('attack_complexity', 'N/A')}</td>
-            <td>{cwe}</td>
-            <td>{cisa}</td>
-            <td>{str(v.get('published', ''))[:10]}</td>
-        </tr>
-"""
-
-    html += f"""    </table>
-
-    <h2>5. ASSETS MATCHING</h2>
-    <table>
-        <tr>
-            <th>Device Name</th><th>IP Address</th><th>Department</th><th>User</th><th>Threat</th><th>Type</th><th>Risk</th><th>Recommendation</th>
-        </tr>
-    """
-
-    for m in matches[:30]:
-        risk_class = (m.get("risk_level") or "low").lower()
-        html += f"""        <tr>
-            <td>{m.get('asset_hostname', 'N/A')}</td>
-            <td>{m.get('asset_ip', 'N/A')}</td>
-            <td>{m.get('asset_dept', 'N/A')[:20]}</td>
-            <td>{m.get('asset_user', 'N/A')[:25]}</td>
-            <td>{m.get('threat_name', 'N/A')[:30]}</td>
-            <td>{m.get('match_type', 'N/A')}</td>
-            <td class="{risk_class}">{m.get('risk_level', 'N/A').upper()}</td>
-            <td>{m.get('recommendation', 'N/A')[:40]}</td>
-        </tr>
-"""
-
-    html += f"""    </table>
-
-    <div class="footer">
-        <p>Auto-generated by TI Agentic Threat Intelligence Platform</p>
-        <p>Report generated: {now_vn.strftime('%Y-%m-%d %H:%M:%S')} UTC+7 | Period: {period_label}</p>
+    html += """        </tbody>
+      </table>
     </div>
+  </div>
+
+  <!-- Malware Section -->
+  <div class="section">
+    <div class="section-head">
+      <div class="section-stripe stripe-malware"></div>
+      <span class="section-title">Malware Families</span>
+      <span class="section-count">{period_label} — {count_mal} gia đình</span>
+    </div>
+    <div class="table-wrap">
+      <table class="mal-table">
+        <colgroup><col><col><col><col><col><col><col></colgroup>
+        <thead>
+          <tr>
+            <th>Tên</th>
+            <th>Loại</th>
+            <th>Mức Độ</th>
+            <th>Aliases</th>
+            <th>Confidence</th>
+            <th>First Seen</th>
+            <th>Mô tả</th>
+          </tr>
+        </thead>
+        <tbody>
+"""
+
+    # Add Malware rows
+    for m in mals[:25]:
+        mal_type = ', '.join(m.get('malware_types', [])[:2]) if m.get('malware_types') else 'N/A'
+        aliases = ', '.join(m.get('aliases', [])[:1]) if m.get('aliases') else 'N/A'
+        risk_class = "b-critical" if m.get("severity") == "critical" else "b-high" if m.get("severity") == "high" else "b-medium" if m.get("severity") == "medium" else "b-low"
+        html += f"""          <tr>
+            <td><strong>{str(m.get('name', 'N/A'))[:25]}</strong></td>
+            <td>{mal_type[:30]}</td>
+            <td><span class="badge {risk_class}">{str(m.get('severity', 'N/A')).upper()}</span></td>
+            <td>{aliases[:25]}</td>
+            <td><span class="score">{m.get('confidence', 0)}%</span></td>
+            <td class="date">{str(m.get('first_seen', ''))[:10]}</td>
+            <td>{str(m.get('description', 'N/A'))[:60]}</td>
+          </tr>
+"""
+
+    if not mals:
+        html += f"""          <tr><td colspan="7" style="text-align:center;">Không có dữ liệu cho {period_label}</td></tr>
+"""
+
+    html = html.replace("{count_mal}", str(len(mals)))
+
+    html += """        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Vulnerability Section -->
+  <div class="section">
+    <div class="section-head">
+      <div class="section-stripe stripe-vuln"></div>
+      <span class="section-title">Vulnerabilities (CVE)</span>
+      <span class="section-count">{period_label} — {count_vuln} lỗ hổng</span>
+    </div>
+    <div class="table-wrap">
+      <table class="vuln-table">
+        <colgroup><col><col><col><col><col><col><col><col><col></colgroup>
+        <thead>
+          <tr>
+            <th>CVE ID</th>
+            <th>CVSS</th>
+            <th>Mức Độ</th>
+            <th>Vector</th>
+            <th>Complexity</th>
+            <th>CWE</th>
+            <th>CISA Exploit</th>
+            <th>Published</th>
+            <th>Mô tả</th>
+          </tr>
+        </thead>
+        <tbody>
+"""
+
+    # Add Vulnerability rows
+    for v in vulns[:20]:
+        cwe = v.get('weaknesses', ['N/A'])[0][:12] if v.get('weaknesses') else 'N/A'
+        cisa = 'Yes' if v.get('cisa_exploit_add') else 'No'
+        cvss = v.get('cvss_v3_score', v.get('cvss_score', 'N/A'))
+        severity = v.get('cvss_v3_severity', v.get('severity', 'N/A')).upper()
+        risk_class = "b-critical" if severity == "CRITICAL" else "b-high" if severity == "HIGH" else "b-medium" if severity == "MEDIUM" else "b-low"
+        html += f"""          <tr>
+            <td class="mono"><strong>{str(v.get('name', 'CVE-XXXX-XXXXX'))}</strong></td>
+            <td><span class="score score-h">{cvss}</span></td>
+            <td><span class="badge {risk_class}">{severity}</span></td>
+            <td>{str(v.get('attack_vector', 'N/A'))[:8]}</td>
+            <td>{str(v.get('attack_complexity', 'N/A'))[:8]}</td>
+            <td><code style="font-size:8px;">{cwe}</code></td>
+            <td>{cisa}</td>
+            <td class="date">{str(v.get('published', ''))[:10]}</td>
+            <td>{str(v.get('description_en', v.get('description', 'N/A')))[:50]}</td>
+          </tr>
+"""
+
+    if not vulns:
+        html += f"""          <tr><td colspan="9" style="text-align:center;">Không có dữ liệu cho {period_label}</td></tr>
+"""
+
+    html = html.replace("{count_vuln}", str(len(vulns)))
+
+    html += """        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="report-footer">
+    <span>Generated by TI Agentic v1.0</span>
+    <span>Confidential — TLP: Amber</span>
+  </div>
+
+</div>
 </body>
 </html>
-    """
+"""
 
-    # Convert HTML to PDF
     try:
-        options = {
-            'page-size': 'A4',
-            'margin-top': '0.75in',
-            'margin-right': '0.75in',
-            'margin-bottom': '0.75in',
-            'margin-left': '0.75in',
-            'encoding': "UTF-8",
-            'no-outline': None,
-            'enable-local-file-access': None,
-        }
-        pdfkit.from_string(html, out_path, options=options)
-        print(f"PDF (HTML): {out_path}")
-        return f"IOC: {len(iocs)} | CVE: {len(vulns)} | Malware: {len(mals)} | Ky: {period_label}"
-    except Exception as e:
-        print(f"PDF generation error: {e}")
-        # Fallback: save as HTML
+        # Save HTML temp file and debug marker
         html_path = out_path.replace('.pdf', '.html')
         with open(html_path, 'w', encoding='utf-8') as f:
             f.write(html)
-        print(f"Fallback HTML: {html_path}")
-        return f"HTML (fallback): {html_path}"
 
-def _gen_pdf(out_path,report_type,now_vn=None):
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib import colors
-    from reportlab.lib.units import cm
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
-    from reportlab.lib.enums import TA_CENTER
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.ttfonts import TTFont
+        # Write debug marker
+        with open('reports/debug_newcode.txt', 'w') as f:
+            f.write(f"New code executed at {now_vn.isoformat()}\nHTML written to {html_path}\n")
 
-    # Register Vietnamese font support with proper encoding
-    default_font = "Helvetica"
-    try:
-        # Try Times New Roman which has better Unicode support
-        pdfmetrics.registerFont(TTFont('VN', 'C:\\Windows\\Fonts\\times.ttf'))
-        default_font = "VN"
-    except:
+        # Try to convert HTML to PDF using pdfkit
         try:
-            # Fallback to Arial
-            pdfmetrics.registerFont(TTFont('VN', 'C:\\Windows\\Fonts\\arial.ttf'))
-            default_font = "VN"
+            import pdfkit
+            options = {
+                'page-size': 'A4',
+                'margin-top': '0.75in',
+                'margin-right': '0.75in',
+                'margin-bottom': '0.75in',
+                'margin-left': '0.75in',
+                'encoding': 'UTF-8',
+                'quiet': ''
+            }
+            pdfkit.from_file(html_path, out_path, options=options)
+            print(f"PDF generated: {out_path}")
         except:
-            # If both fail, use Helvetica (will work but with encoding issues)
-            pass
+            # If pdfkit fails, just keep HTML as fallback
+            print(f"PDF conversion failed, keeping HTML: {html_path}")
 
-    if now_vn is None: now_vn=datetime.now(VN_TZ)
-
-    # Helper to convert Vietnamese text to ASCII-compatible format for PDF
-    def to_ascii(text):
-        """Convert Vietnamese text to ASCII-compatible format"""
-        if text is None:
-            return ""
-
-        import unicodedata
-        text = str(text)
-
-        # Vietnamese to English character mapping
-        vn_map = {
-            'à': 'a', 'á': 'a', 'ả': 'a', 'ã': 'a', 'ạ': 'a',
-            'ă': 'a', 'ằ': 'a', 'ắ': 'a', 'ẳ': 'a', 'ẵ': 'a', 'ặ': 'a',
-            'â': 'a', 'ầ': 'a', 'ấ': 'a', 'ẩ': 'a', 'ẫ': 'a', 'ậ': 'a',
-            'đ': 'd',
-            'è': 'e', 'é': 'e', 'ẻ': 'e', 'ẽ': 'e', 'ẹ': 'e',
-            'ê': 'e', 'ề': 'e', 'ế': 'e', 'ể': 'e', 'ễ': 'e', 'ệ': 'e',
-            'ì': 'i', 'í': 'i', 'ỉ': 'i', 'ĩ': 'i', 'ị': 'i',
-            'ò': 'o', 'ó': 'o', 'ỏ': 'o', 'õ': 'o', 'ọ': 'o',
-            'ô': 'o', 'ồ': 'o', 'ố': 'o', 'ổ': 'o', 'ỗ': 'o', 'ộ': 'o',
-            'ơ': 'o', 'ờ': 'o', 'ớ': 'o', 'ở': 'o', 'ỡ': 'o', 'ợ': 'o',
-            'ù': 'u', 'ú': 'u', 'ủ': 'u', 'ũ': 'u', 'ụ': 'u',
-            'ư': 'u', 'ừ': 'u', 'ứ': 'u', 'ử': 'u', 'ữ': 'u', 'ự': 'u',
-            'ỳ': 'y', 'ý': 'y', 'ỷ': 'y', 'ỹ': 'y', 'ỵ': 'y',
-        }
-
-        result = []
-        for char in text:
-            if char in vn_map:
-                result.append(vn_map[char])
-            else:
-                result.append(char)
-
-        return ''.join(result)
-
-    # --- Loc du lieu theo ky bao cao ---
-    today_str = now_vn.strftime("%Y-%m-%d")
-    week_start = (now_vn - timedelta(days=now_vn.weekday())).strftime("%Y-%m-%d")
-    month_str  = now_vn.strftime("%Y-%m")
-
-    def in_period(item):
-        """Kiem tra item co thuoc ky bao cao khong (dua tren created_at hoac modified)."""
-        ca = str(item.get("created_at","") or "")[:10]
-        mo = str(item.get("modified","") or item.get("valid_from","") or "")[:10]
-        date = ca if ca > mo else mo   # lay ngay muon nhat
-        if not date or len(date) < 7:
-            return True  # khong co ngay -> luon hien
-        if report_type == "daily":
-            return date == today_str
-        elif report_type == "weekly":
-            return date >= week_start
-        elif report_type == "monthly":
-            return date[:7] == month_str
-        return True
-
-    all_iocs    = store["iocs"]
-    all_mals    = store["malwares"]
-    all_vulns   = store["vulnerabilities"]
-    all_matches = store["matches"]
-
-    iocs    = [i for i in all_iocs    if in_period(i)]
-    mals    = [m for m in all_mals    if in_period(m)]
-    vulns   = [v for v in all_vulns   if in_period(v)]
-    matches = [m for m in all_matches if in_period(m)]
-
-    # Neu loc qua khat thi lay het nhung danh dau
-    filtered = len(iocs) < len(all_iocs) or len(vulns) < len(all_vulns)
-    period_label = {
-        "daily":   f"ngay {now_vn.strftime('%d/%m/%Y')}",
-        "weekly":  f"tuan tu {week_start}",
-        "monthly": f"thang {now_vn.strftime('%m/%Y')}",
-    }.get(report_type, "")
-
-    doc=SimpleDocTemplate(out_path,pagesize=A4,leftMargin=1.8*cm,rightMargin=1.8*cm,topMargin=2*cm,bottomMargin=2*cm)
-    styles=getSampleStyleSheet()
-    C_HEAD=colors.HexColor("#1a237e"); C_ALT=colors.HexColor("#e8eaf6"); C_WHITE=colors.white
-    RCOL={"critical":colors.HexColor("#b71c1c"),"high":colors.HexColor("#e65100"),"medium":colors.HexColor("#f57f17"),"low":colors.HexColor("#2e7d32")}
-
-    # Styles with Vietnamese font support
-    title_s=ParagraphStyle("t",parent=styles["Title"],fontSize=16,fontName=default_font,textColor=C_HEAD,alignment=TA_CENTER,spaceAfter=4)
-    sub_s=ParagraphStyle("s",parent=styles["Normal"],fontSize=9,fontName=default_font,textColor=colors.HexColor("#546e7a"),alignment=TA_CENTER,spaceAfter=2)
-    h2_s=ParagraphStyle("h",parent=styles["Heading2"],fontSize=12,fontName=default_font,textColor=C_HEAD,spaceBefore=12,spaceAfter=6)
-    sm_s=ParagraphStyle("sm",parent=styles["Normal"],fontSize=8,fontName=default_font,leading=11)
-    def rc(level): return RCOL.get((level or "").lower(),colors.grey)
-    def tbl(headers,rows,widths):
-        data=[headers]+(rows or [["—"]*len(headers)])
-        t=Table(data,colWidths=widths,repeatRows=1)
-        # Use Vietnamese-compatible font for table
-        header_font = f"{default_font}-Bold" if default_font != "Helvetica" else "Helvetica-Bold"
-        body_font = default_font if default_font != "Helvetica" else "Helvetica"
-        t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),C_HEAD),("TEXTCOLOR",(0,0),(-1,0),C_WHITE),
-            ("FONTNAME",(0,0),(-1,0),header_font),("FONTSIZE",(0,0),(-1,0),8),("ALIGN",(0,0),(-1,0),"CENTER"),
-            ("FONTNAME",(0,1),(-1,-1),body_font),("FONTSIZE",(0,1),(-1,-1),7.5),("VALIGN",(0,0),(-1,-1),"MIDDLE"),
-            ("GRID",(0,0),(-1,-1),0.35,colors.HexColor("#b0bec5")),("ROWBACKGROUNDS",(0,1),(-1,-1),[C_WHITE,C_ALT]),
-            ("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),("TOPPADDING",(0,0),(-1,-1),3),("BOTTOMPADDING",(0,0),(-1,-1),3)]))
-        return t
-
-    type_label={"daily":"HANG NGAY","weekly":"HANG TUAN","monthly":"HANG THANG"}.get(report_type,"DINH KY")
-    story=[Spacer(1,0.3*cm)]
-    story.append(Paragraph(f"BAO CAO THREAT INTELLIGENCE {type_label}",title_s))
-    story.append(Paragraph(
-        f"Ky: {period_label}  |  Tao luc: {now_vn.strftime('%d/%m/%Y %H:%M:%S')} (UTC+7)  |  "
-        f"Nguon: {store.get('source','?')}",sub_s))
-    if filtered:
-        story.append(Paragraph(
-            f"* Chi hien thi du lieu trong {period_label}. "
-            f"Tong kho: {len(all_iocs)} IOC | {len(all_vulns)} CVE | {len(all_mals)} Malware",
-            ParagraphStyle("note",parent=styles["Normal"],fontSize=8,textColor=colors.HexColor("#e65100"),alignment=TA_CENTER,spaceAfter=4)))
-    story.append(HRFlowable(width="100%",thickness=1.5,color=C_HEAD,spaceAfter=10))
-
-    story.append(Paragraph("1. TONG QUAN",h2_s))
-    story.append(tbl(["Chi so","Gia tri","Chi so","Gia tri"],[
-        ["Tong IOC",str(len(iocs)),"Critical",str(sum(1 for i in iocs if i.get("risk_level")=="critical"))],
-        ["False Positive",str(sum(1 for i in iocs if i.get("is_false_positive"))),"High",str(sum(1 for i in iocs if i.get("risk_level")=="high"))],
-        ["Malware",str(len(mals)),"CVE Critical",str(sum(1 for v in vulns if v.get("severity")=="critical"))],
-        ["Thiet bi anh huong",str(len(set(m["asset_hostname"] for m in matches))),"Tong matches",str(len(matches))]
-    ],[5.5*cm,3*cm,5.5*cm,3*cm]))
-    story.append(Spacer(1,0.3*cm))
-
-    danger=[i for i in iocs if i.get("risk_level") in ("critical","high")]
-    story.append(Paragraph(f"2. IOC NGUY HIEM — {len(danger)} muc ({period_label})",h2_s))
-    if danger:
-        story.append(tbl(["IOC","Loai","Muc do","Conf.","Ngay tao","Ly do"],
-            [[Paragraph(i["name"],sm_s),i.get("ioc_type","?"),
-              Paragraph(f'<font color="{rc(i["risk_level"]).hexval()}">{i["risk_level"].upper()}</font>',sm_s),
-              f'{i.get("confidence",0)}%',str(i.get("created_at",""))[:10],
-              Paragraph(i.get("reason","")[:60],sm_s)] for i in danger[:35]],
-            [5.5*cm,1.8*cm,2.2*cm,1.3*cm,2.2*cm,4.5*cm]))
-    elif filtered:
-        story.append(Paragraph(f"Khong co IOC nguy hiem moi trong {period_label}.",sm_s))
-    story.append(Spacer(1,0.3*cm))
-
-    story.append(Paragraph(f"3. LO HONG — {len(vulns)} muc ({period_label})",h2_s))
-    if vulns:
-        story.append(tbl(["CVE","CVSS","Muc do","Phan mem","Patch","Ngay tao","Mo ta"],
-            [[Paragraph(f'<b>{v["name"]}</b>',sm_s),
-              Paragraph(f'<font color="{rc(v["severity"]).hexval()}">{str(v.get("cvss_score","?"))}</font>',sm_s),
-              Paragraph(f'<font color="{rc(v["severity"]).hexval()}">{v.get("severity","?").upper()}</font>',sm_s),
-              v.get("affected_software","?"),"Có" if v.get("patch_available") else "Chưa",
-              str(v.get("created_at",""))[:10],Paragraph(v.get("description","")[:70],sm_s)] for v in vulns[:25]],
-            [2.8*cm,1.3*cm,2*cm,2.5*cm,1.3*cm,2*cm,5.6*cm]))
-    elif filtered:
-        story.append(Paragraph(f"Khong co CVE mới trong {period_label}.",sm_s))
-    story.append(Spacer(1,0.3*cm))
-
-    story.append(Paragraph(f"4. MALWARE — {len(mals)} mục ({period_label})",h2_s))
-    if mals:
-        story.append(tbl(["Ten","Loai","Muc do","Ngay tao","Ngay chinh sua","Mo ta"],
-            [[Paragraph(f'<b>{m["name"]}</b>',sm_s),", ".join(m.get("malware_types",[]))[:25],
-              Paragraph(f'<font color="{rc(m["severity"]).hexval()}">{m.get("severity","?").upper()}</font>',sm_s),
-              str(m.get("created_at",""))[:10],str(m.get("modified",""))[:10],
-              Paragraph(m.get("description","")[:90],sm_s)] for m in mals[:20]],
-            [3.5*cm,2.8*cm,2*cm,2.2*cm,2.2*cm,4.8*cm]))
-    elif filtered:
-        story.append(Paragraph(f"Khong co Malware mới trong {period_label}.",sm_s))
-    story.append(Spacer(1,0.3*cm))
-
-    crit_m=[m for m in matches if m.get("risk_level") in ("critical","high")]
-    story.append(Paragraph(f"5. THIẾT BỊ BỊ ẢNH HƯỞNG — {len(crit_m)} mục",h2_s))
-    if crit_m:
-        story.append(tbl(["Thiet bi","IP","Moi de doa","Loai","Muc do","Hanh dong"],
-            [[Paragraph(f'<b>{m.get("asset_hostname","?")}</b>',sm_s),m.get("asset_ip","?"),
-              Paragraph(m.get("threat_name","?"),sm_s),m.get("match_type","?"),
-              Paragraph(f'<font color="{rc(m["risk_level"]).hexval()}">{m["risk_level"].upper()}</font>',sm_s),
-              Paragraph(m.get("recommendation","")[:70],sm_s)] for m in crit_m[:25]],
-            [3*cm,2.5*cm,3*cm,2*cm,2*cm,5*cm]))
-
-    story.extend([Spacer(1,0.6*cm),HRFlowable(width="100%",thickness=0.5,color=colors.HexColor("#b0bec5")),Spacer(1,0.15*cm)])
-    story.append(Paragraph(
-        f"Báo cáo tự động bởi TI Agentic Demo  |  {now_vn.strftime('%d/%m/%Y %H:%M:%S')} (UTC+7)  |  Kỳ: {period_label}",
-        ParagraphStyle("ft",parent=styles["Normal"],fontSize=7,textColor=colors.HexColor("#90a4ae"),alignment=TA_CENTER)))
-    doc.build(story)
-    print(f"PDF: {out_path}")
-    return f"IOC: {len(iocs)} | CVE: {len(vulns)} | Malware: {len(mals)} | Kỳ: {period_label}"
+        return f"Report: {len(iocs_no_yara)} IOCs, {len(vulns)} CVEs, {len(mals)} Malware ({period_label})"
+    except Exception as e:
+        print(f"Error: {e}")
+        return f"Error: {str(e)[:100]}"
 
 
 # OPEN REPORTS FOLDER
