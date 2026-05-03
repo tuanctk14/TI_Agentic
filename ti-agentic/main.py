@@ -732,6 +732,18 @@ def _gen_pdf(out_path,report_type,now_vn=None):
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
     from reportlab.lib.enums import TA_CENTER
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    # Register Vietnamese font support
+    try:
+        # Try to use Arial Unicode or fallback font with Vietnamese support
+        pdfmetrics.registerFont(TTFont('VN', 'C:\\Windows\\Fonts\\arial.ttf'))
+        default_font = "VN"
+    except:
+        # If custom font fails, use standard Helvetica (may have limited Vietnamese support)
+        default_font = "Helvetica"
+
     if now_vn is None: now_vn=datetime.now(VN_TZ)
 
     # --- Loc du lieu theo ky bao cao ---
@@ -776,17 +788,22 @@ def _gen_pdf(out_path,report_type,now_vn=None):
     styles=getSampleStyleSheet()
     C_HEAD=colors.HexColor("#1a237e"); C_ALT=colors.HexColor("#e8eaf6"); C_WHITE=colors.white
     RCOL={"critical":colors.HexColor("#b71c1c"),"high":colors.HexColor("#e65100"),"medium":colors.HexColor("#f57f17"),"low":colors.HexColor("#2e7d32")}
-    title_s=ParagraphStyle("t",parent=styles["Title"],fontSize=16,textColor=C_HEAD,alignment=TA_CENTER,spaceAfter=4)
-    sub_s=ParagraphStyle("s",parent=styles["Normal"],fontSize=9,textColor=colors.HexColor("#546e7a"),alignment=TA_CENTER,spaceAfter=2)
-    h2_s=ParagraphStyle("h",parent=styles["Heading2"],fontSize=12,textColor=C_HEAD,spaceBefore=12,spaceAfter=6)
-    sm_s=ParagraphStyle("sm",parent=styles["Normal"],fontSize=8,leading=11)
+
+    # Styles with Vietnamese font support
+    title_s=ParagraphStyle("t",parent=styles["Title"],fontSize=16,fontName=default_font,textColor=C_HEAD,alignment=TA_CENTER,spaceAfter=4)
+    sub_s=ParagraphStyle("s",parent=styles["Normal"],fontSize=9,fontName=default_font,textColor=colors.HexColor("#546e7a"),alignment=TA_CENTER,spaceAfter=2)
+    h2_s=ParagraphStyle("h",parent=styles["Heading2"],fontSize=12,fontName=default_font,textColor=C_HEAD,spaceBefore=12,spaceAfter=6)
+    sm_s=ParagraphStyle("sm",parent=styles["Normal"],fontSize=8,fontName=default_font,leading=11)
     def rc(level): return RCOL.get((level or "").lower(),colors.grey)
     def tbl(headers,rows,widths):
         data=[headers]+(rows or [["—"]*len(headers)])
         t=Table(data,colWidths=widths,repeatRows=1)
+        # Use Vietnamese-compatible font for table
+        header_font = f"{default_font}-Bold" if default_font != "Helvetica" else "Helvetica-Bold"
+        body_font = default_font if default_font != "Helvetica" else "Helvetica"
         t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),C_HEAD),("TEXTCOLOR",(0,0),(-1,0),C_WHITE),
-            ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,0),8),("ALIGN",(0,0),(-1,0),"CENTER"),
-            ("FONTNAME",(0,1),(-1,-1),"Helvetica"),("FONTSIZE",(0,1),(-1,-1),7.5),("VALIGN",(0,0),(-1,-1),"MIDDLE"),
+            ("FONTNAME",(0,0),(-1,0),header_font),("FONTSIZE",(0,0),(-1,0),8),("ALIGN",(0,0),(-1,0),"CENTER"),
+            ("FONTNAME",(0,1),(-1,-1),body_font),("FONTSIZE",(0,1),(-1,-1),7.5),("VALIGN",(0,0),(-1,-1),"MIDDLE"),
             ("GRID",(0,0),(-1,-1),0.35,colors.HexColor("#b0bec5")),("ROWBACKGROUNDS",(0,1),(-1,-1),[C_WHITE,C_ALT]),
             ("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),("TOPPADDING",(0,0),(-1,-1),3),("BOTTOMPADDING",(0,0),(-1,-1),3)]))
         return t
