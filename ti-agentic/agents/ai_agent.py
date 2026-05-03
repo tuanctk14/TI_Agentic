@@ -680,13 +680,28 @@ def run_agent(user_query: str, store: Dict) -> Generator:
                             "content": json.dumps(result, ensure_ascii=False)
                         })
 
-                        # Báo client kết quả
-                        yield {
-                            "type": "tool_result",
-                            "step": iteration,
-                            "tool": tool_name,
-                            "result": result
-                        }
+                        # Báo client kết quả — với special handling cho alert và memory
+                        if tool_name == "create_alert" and result.get("success"):
+                            yield {
+                                "type": "alert",
+                                "severity": tool_args.get("severity", "high"),
+                                "threat_name": tool_args.get("threat_name", ""),
+                                "affected_assets": tool_args.get("affected_assets", []),
+                                "alert_message": result.get("message", "")
+                            }
+                        elif tool_name == "check_memory" and result.get("found"):
+                            yield {
+                                "type": "memory_recall",
+                                "entity": tool_args.get("entity_name", ""),
+                                "history": result.get("history", {})
+                            }
+                        else:
+                            yield {
+                                "type": "tool_result",
+                                "step": iteration,
+                                "tool": tool_name,
+                                "result": result
+                            }
                     except Exception as e:
                         yield {
                             "type": "tool_error",
