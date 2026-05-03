@@ -70,11 +70,14 @@ def _load_from_cache():
         meta_file = cache_dir / "metadata.json"
 
         if iocs_file.exists():
-            store["iocs"] = json.loads(iocs_file.read_text(encoding='utf-8'))
+            with open(iocs_file, encoding='utf-8') as f:
+                store["iocs"] = json.load(f)
         if mals_file.exists():
-            store["malwares"] = json.loads(mals_file.read_text(encoding='utf-8'))
+            with open(mals_file, encoding='utf-8') as f:
+                store["malwares"] = json.load(f)
         if vulns_file.exists():
-            store["vulnerabilities"] = json.loads(vulns_file.read_text(encoding='utf-8'))
+            with open(vulns_file, encoding='utf-8') as f:
+                store["vulnerabilities"] = json.load(f)
 
         if meta_file.exists():
             meta = json.loads(meta_file.read_text(encoding='utf-8'))
