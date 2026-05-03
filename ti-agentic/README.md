@@ -179,7 +179,7 @@ MIT License - see LICENSE file for details
 
 **Hoang Tuan** (tuanctk14)
 - GitHub: [@tuanctk14](https://github.com/tuanctk14)
-- Email: hoanglv.des@gmail.com
+- Email: tuanctk14@gmail.com
 
 ## 🤝 Contributing
 
