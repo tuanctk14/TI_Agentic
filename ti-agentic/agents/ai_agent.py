@@ -19,21 +19,29 @@ MAX_ITERATIONS = 12  # Tăng từ 5 lên 12 để đủ cho multi-step reasoning
 ollama.Client(host=OLLAMA_HOST)
 
 # System prompt cho Agent với enforced reasoning và quy trình 7 bước
-SYSTEM_PROMPT = """Bạn là AI Security Agent chuyên gia về Threat Intelligence với khả năng ra quyết định tự chủ.
+SYSTEM_PROMPT = """Bạn là AI Security Agent chuyên gia về Threat Intelligence. Sử dụng các tool để phân tích mối đe dọa.
 
-QUY TRÌNH:
-1. check_memory(entity) — Kiểm tra lịch sử
-2. search — Tìm threat (search_vulnerabilities, search_iocs, search_malware)
-3. enrich — Nếu CVSS=0 → gọi enrich_vulnerability để bổ sung NVD
-4. get_device_matches(entity) — Tìm assets bị ảnh hưởng
-5. Quyết định — Alert nếu: (CVSS≥7.0 AND assets≥1) OR (exploit in wild)
-6. create_alert — Nếu quyết định alert
-7. save_investigation — Luôn lưu kết quả vào memory
+TOOLS AVAILABLE:
+- search_iocs(query, ioc_type?, risk_level?) — Tìm IOC. ioc_type: "IP"/"Domain"/"URL"/"Hash"/"Wallet"/"Yara". risk_level: "critical"/"high"/"medium"/"low"
+- search_malware(query) — Tìm malware
+- search_vulnerabilities(query, min_cvss?) — Tìm CVE
+- get_device_matches(threat_name) — Tìm thiết bị bị ảnh hưởng
+- create_alert(severity, threat_name, affected_assets, reason, recommended_action) — Tạo alert
+- check_memory(entity_name) — Kiểm tra lịch sử
 
-VIẾT TẮT, KHÔNG GIẢI THÍCH QUAY QUAY. Output:
-- Chỉ hiển thị: THREAT NAME, DECISION (alert/no alert), LÝ DO (1-2 câu)
-- Nếu tạo alert: hiển thị severity + affected assets + recommended action
-- Không cần liệt kê tất cả tool calls — đó là chi tiết bên trong
+QUY TRÌNH PHÂN TÍCH:
+1. search (search_iocs hoặc search_malware hoặc search_vulnerabilities)
+2. get_device_matches để tìm assets bị ảnh hưởng
+3. Quyết định: alert nếu (CVSS≥7.0 AND assets≥1) OR (exploit detected)
+4. create_alert nếu cần
+
+OUTPUT FORMAT (BẮT BUỘC):
+Threat Name: [tên mối đe dọa]
+Decision: [Alert / No Alert]
+Reason: [1-2 câu giải thích]
+Affected Assets: [số lượng hoặc danh sách]
+
+CHỈ GỌI TOOL ĐÚNG PARAMETERS. KHÔNG GỌI TOOL SAI CẬP.
 """
 
 # Tool definitions
@@ -625,6 +633,14 @@ def run_agent(user_query: str, store: Dict) -> Generator:
                         "tool": tool_name,
                         "args": tool_args
                     }
+
+                    # Validate tool arguments trước khi execute
+                    if tool_name == "search_iocs" and "risk_level" in tool_args:
+                        if tool_args["risk_level"] not in ["critical", "high", "medium", "low", ""]:
+                            tool_args.pop("risk_level")  # Remove invalid risk_level
+                    if tool_name == "search_iocs" and "ioc_type" in tool_args:
+                        if tool_args["ioc_type"] not in ["IP", "Domain", "URL", "Hash", "Wallet", "Yara", ""]:
+                            tool_args.pop("ioc_type")  # Remove invalid ioc_type
 
                     # Thực thi tool
                     try:
