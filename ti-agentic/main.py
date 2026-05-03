@@ -735,16 +735,57 @@ def _gen_pdf(out_path,report_type,now_vn=None):
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
 
-    # Register Vietnamese font support
+    # Register Vietnamese font support with proper encoding
+    default_font = "Helvetica"
     try:
-        # Try to use Arial Unicode or fallback font with Vietnamese support
-        pdfmetrics.registerFont(TTFont('VN', 'C:\\Windows\\Fonts\\arial.ttf'))
+        # Try Times New Roman which has better Unicode support
+        pdfmetrics.registerFont(TTFont('VN', 'C:\\Windows\\Fonts\\times.ttf'))
         default_font = "VN"
     except:
-        # If custom font fails, use standard Helvetica (may have limited Vietnamese support)
-        default_font = "Helvetica"
+        try:
+            # Fallback to Arial
+            pdfmetrics.registerFont(TTFont('VN', 'C:\\Windows\\Fonts\\arial.ttf'))
+            default_font = "VN"
+        except:
+            # If both fail, use Helvetica (will work but with encoding issues)
+            pass
 
     if now_vn is None: now_vn=datetime.now(VN_TZ)
+
+    # Helper to convert Vietnamese text to ASCII-compatible format for PDF
+    def to_ascii(text):
+        """Convert Vietnamese text to ASCII-compatible format"""
+        if text is None:
+            return ""
+
+        import unicodedata
+        text = str(text)
+
+        # Vietnamese to English character mapping
+        vn_map = {
+            'à': 'a', 'á': 'a', 'ả': 'a', 'ã': 'a', 'ạ': 'a',
+            'ă': 'a', 'ằ': 'a', 'ắ': 'a', 'ẳ': 'a', 'ẵ': 'a', 'ặ': 'a',
+            'â': 'a', 'ầ': 'a', 'ấ': 'a', 'ẩ': 'a', 'ẫ': 'a', 'ậ': 'a',
+            'đ': 'd',
+            'è': 'e', 'é': 'e', 'ẻ': 'e', 'ẽ': 'e', 'ẹ': 'e',
+            'ê': 'e', 'ề': 'e', 'ế': 'e', 'ể': 'e', 'ễ': 'e', 'ệ': 'e',
+            'ì': 'i', 'í': 'i', 'ỉ': 'i', 'ĩ': 'i', 'ị': 'i',
+            'ò': 'o', 'ó': 'o', 'ỏ': 'o', 'õ': 'o', 'ọ': 'o',
+            'ô': 'o', 'ồ': 'o', 'ố': 'o', 'ổ': 'o', 'ỗ': 'o', 'ộ': 'o',
+            'ơ': 'o', 'ờ': 'o', 'ớ': 'o', 'ở': 'o', 'ỡ': 'o', 'ợ': 'o',
+            'ù': 'u', 'ú': 'u', 'ủ': 'u', 'ũ': 'u', 'ụ': 'u',
+            'ư': 'u', 'ừ': 'u', 'ứ': 'u', 'ử': 'u', 'ữ': 'u', 'ự': 'u',
+            'ỳ': 'y', 'ý': 'y', 'ỷ': 'y', 'ỹ': 'y', 'ỵ': 'y',
+        }
+
+        result = []
+        for char in text:
+            if char in vn_map:
+                result.append(vn_map[char])
+            else:
+                result.append(char)
+
+        return ''.join(result)
 
     # --- Loc du lieu theo ky bao cao ---
     today_str = now_vn.strftime("%Y-%m-%d")
@@ -779,9 +820,9 @@ def _gen_pdf(out_path,report_type,now_vn=None):
     # Neu loc qua khat thi lay het nhung danh dau
     filtered = len(iocs) < len(all_iocs) or len(vulns) < len(all_vulns)
     period_label = {
-        "daily":   f"ngày {now_vn.strftime('%d/%m/%Y')}",
-        "weekly":  f"tuần từ {week_start}",
-        "monthly": f"tháng {now_vn.strftime('%m/%Y')}",
+        "daily":   f"ngay {now_vn.strftime('%d/%m/%Y')}",
+        "weekly":  f"tuan tu {week_start}",
+        "monthly": f"thang {now_vn.strftime('%m/%Y')}",
     }.get(report_type, "")
 
     doc=SimpleDocTemplate(out_path,pagesize=A4,leftMargin=1.8*cm,rightMargin=1.8*cm,topMargin=2*cm,bottomMargin=2*cm)
@@ -808,44 +849,44 @@ def _gen_pdf(out_path,report_type,now_vn=None):
             ("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),("TOPPADDING",(0,0),(-1,-1),3),("BOTTOMPADDING",(0,0),(-1,-1),3)]))
         return t
 
-    type_label={"daily":"HÀNG NGÀY","weekly":"HÀNG TUẦN","monthly":"HÀNG THÁNG"}.get(report_type,"ĐỊNH KỲ")
+    type_label={"daily":"HANG NGAY","weekly":"HANG TUAN","monthly":"HANG THANG"}.get(report_type,"DINH KY")
     story=[Spacer(1,0.3*cm)]
-    story.append(Paragraph(f"BÁO CÁO THREAT INTELLIGENCE {type_label}",title_s))
+    story.append(Paragraph(f"BAO CAO THREAT INTELLIGENCE {type_label}",title_s))
     story.append(Paragraph(
-        f"Kỳ: {period_label}  |  Tạo lúc: {now_vn.strftime('%d/%m/%Y %H:%M:%S')} (UTC+7)  |  "
-        f"Nguồn: {store.get('source','?')}",sub_s))
+        f"Ky: {period_label}  |  Tao luc: {now_vn.strftime('%d/%m/%Y %H:%M:%S')} (UTC+7)  |  "
+        f"Nguon: {store.get('source','?')}",sub_s))
     if filtered:
         story.append(Paragraph(
-            f"* Chỉ hiển thị dữ liệu trong {period_label}. "
-            f"Tổng kho: {len(all_iocs)} IOC | {len(all_vulns)} CVE | {len(all_mals)} Malware",
+            f"* Chi hien thi du lieu trong {period_label}. "
+            f"Tong kho: {len(all_iocs)} IOC | {len(all_vulns)} CVE | {len(all_mals)} Malware",
             ParagraphStyle("note",parent=styles["Normal"],fontSize=8,textColor=colors.HexColor("#e65100"),alignment=TA_CENTER,spaceAfter=4)))
     story.append(HRFlowable(width="100%",thickness=1.5,color=C_HEAD,spaceAfter=10))
 
-    story.append(Paragraph("1. TỔNG QUAN",h2_s))
-    story.append(tbl(["Chỉ số","Giá trị","Chỉ số","Giá trị"],[
-        ["Tổng IOC",str(len(iocs)),"Critical",str(sum(1 for i in iocs if i.get("risk_level")=="critical"))],
+    story.append(Paragraph("1. TONG QUAN",h2_s))
+    story.append(tbl(["Chi so","Gia tri","Chi so","Gia tri"],[
+        ["Tong IOC",str(len(iocs)),"Critical",str(sum(1 for i in iocs if i.get("risk_level")=="critical"))],
         ["False Positive",str(sum(1 for i in iocs if i.get("is_false_positive"))),"High",str(sum(1 for i in iocs if i.get("risk_level")=="high"))],
         ["Malware",str(len(mals)),"CVE Critical",str(sum(1 for v in vulns if v.get("severity")=="critical"))],
-        ["Thiết bị ảnh hưởng",str(len(set(m["asset_hostname"] for m in matches))),"Tổng matches",str(len(matches))]
+        ["Thiet bi anh huong",str(len(set(m["asset_hostname"] for m in matches))),"Tong matches",str(len(matches))]
     ],[5.5*cm,3*cm,5.5*cm,3*cm]))
     story.append(Spacer(1,0.3*cm))
 
     danger=[i for i in iocs if i.get("risk_level") in ("critical","high")]
-    story.append(Paragraph(f"2. IOC NGUY HIỂM — {len(danger)} mục ({period_label})",h2_s))
+    story.append(Paragraph(f"2. IOC NGUY HIEM — {len(danger)} muc ({period_label})",h2_s))
     if danger:
-        story.append(tbl(["IOC","Loại","Mức độ","Conf.","Ngày tạo","Lý do"],
+        story.append(tbl(["IOC","Loai","Muc do","Conf.","Ngay tao","Ly do"],
             [[Paragraph(i["name"],sm_s),i.get("ioc_type","?"),
               Paragraph(f'<font color="{rc(i["risk_level"]).hexval()}">{i["risk_level"].upper()}</font>',sm_s),
               f'{i.get("confidence",0)}%',str(i.get("created_at",""))[:10],
               Paragraph(i.get("reason","")[:60],sm_s)] for i in danger[:35]],
             [5.5*cm,1.8*cm,2.2*cm,1.3*cm,2.2*cm,4.5*cm]))
     elif filtered:
-        story.append(Paragraph(f"Không có IOC nguy hiểm mới trong {period_label}.",sm_s))
+        story.append(Paragraph(f"Khong co IOC nguy hiem moi trong {period_label}.",sm_s))
     story.append(Spacer(1,0.3*cm))
 
-    story.append(Paragraph(f"3. LỖ HỔNG — {len(vulns)} mục ({period_label})",h2_s))
+    story.append(Paragraph(f"3. LO HONG — {len(vulns)} muc ({period_label})",h2_s))
     if vulns:
-        story.append(tbl(["CVE","CVSS","Mức độ","Phần mềm","Patch","Ngày tạo","Mô tả"],
+        story.append(tbl(["CVE","CVSS","Muc do","Phan mem","Patch","Ngay tao","Mo ta"],
             [[Paragraph(f'<b>{v["name"]}</b>',sm_s),
               Paragraph(f'<font color="{rc(v["severity"]).hexval()}">{str(v.get("cvss_score","?"))}</font>',sm_s),
               Paragraph(f'<font color="{rc(v["severity"]).hexval()}">{v.get("severity","?").upper()}</font>',sm_s),
@@ -853,25 +894,25 @@ def _gen_pdf(out_path,report_type,now_vn=None):
               str(v.get("created_at",""))[:10],Paragraph(v.get("description","")[:70],sm_s)] for v in vulns[:25]],
             [2.8*cm,1.3*cm,2*cm,2.5*cm,1.3*cm,2*cm,5.6*cm]))
     elif filtered:
-        story.append(Paragraph(f"Không có CVE mới trong {period_label}.",sm_s))
+        story.append(Paragraph(f"Khong co CVE mới trong {period_label}.",sm_s))
     story.append(Spacer(1,0.3*cm))
 
     story.append(Paragraph(f"4. MALWARE — {len(mals)} mục ({period_label})",h2_s))
     if mals:
-        story.append(tbl(["Tên","Loại","Mức độ","Ngày tạo","Ngày chỉnh sửa","Mô tả"],
+        story.append(tbl(["Ten","Loai","Muc do","Ngay tao","Ngay chinh sua","Mo ta"],
             [[Paragraph(f'<b>{m["name"]}</b>',sm_s),", ".join(m.get("malware_types",[]))[:25],
               Paragraph(f'<font color="{rc(m["severity"]).hexval()}">{m.get("severity","?").upper()}</font>',sm_s),
               str(m.get("created_at",""))[:10],str(m.get("modified",""))[:10],
               Paragraph(m.get("description","")[:90],sm_s)] for m in mals[:20]],
             [3.5*cm,2.8*cm,2*cm,2.2*cm,2.2*cm,4.8*cm]))
     elif filtered:
-        story.append(Paragraph(f"Không có Malware mới trong {period_label}.",sm_s))
+        story.append(Paragraph(f"Khong co Malware mới trong {period_label}.",sm_s))
     story.append(Spacer(1,0.3*cm))
 
     crit_m=[m for m in matches if m.get("risk_level") in ("critical","high")]
     story.append(Paragraph(f"5. THIẾT BỊ BỊ ẢNH HƯỞNG — {len(crit_m)} mục",h2_s))
     if crit_m:
-        story.append(tbl(["Thiết bị","IP","Mối đe dọa","Loại","Mức độ","Hành động"],
+        story.append(tbl(["Thiet bi","IP","Moi de doa","Loai","Muc do","Hanh dong"],
             [[Paragraph(f'<b>{m.get("asset_hostname","?")}</b>',sm_s),m.get("asset_ip","?"),
               Paragraph(m.get("threat_name","?"),sm_s),m.get("match_type","?"),
               Paragraph(f'<font color="{rc(m["risk_level"]).hexval()}">{m["risk_level"].upper()}</font>',sm_s),
