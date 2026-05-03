@@ -1,0 +1,25 @@
+{
+  "investigations": {
+    "CVE-2024-1234": {
+      "first_seen": "2026-05-03T07:33:03.599756",
+      "times_investigated": 1,
+      "actions": [
+        {
+          "timestamp": "2026-05-03T07:33:03.599756",
+          "finding": "Tóm tắt về CVE-2024-1234: Đây là một vulnerabilty được phát hiện trong phần mềm XYZ, có CVSS score 6.0 và ảnh hưởng đến các asset trong hệ thống.",
+          "action": "no_action_needed"
+        }
+      ],
+      "last_seen": "2026-05-03T07:33:03.599756",
+      "action_taken": "no_action_needed",
+      "affected_assets": []
+    }
+  },
+  "alerted_assets": {},
+  "known_threats": {},
+  "metadata": {
+    "version": "1.0",
+    "created": "2026-05-03T00:00:00",
+    "last_updated": "2026-05-03T07:33:03.599756"
+  }
+}

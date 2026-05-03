@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+requests
+pandas
+openpyxl
+chromadb
+sentence-transformers
+ollama
+apscheduler
+python-dotenv
+reportlab
+openai
