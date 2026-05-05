@@ -958,7 +958,7 @@ def _gen_pdf_html(out_path, report_type, now_vn=None):
 """
 
     # Add IOC rows
-    for i in iocs_no_yara[:30]:
+    for i in iocs_no_yara:
         risk_color = "score-h" if i.get("risk_level") == "critical" else "score-m" if i.get("risk_level") == "high" else "score-l"
         risk_class = "b-critical" if i.get("risk_level") == "critical" else "b-high" if i.get("risk_level") == "high" else "b-medium" if i.get("risk_level") == "medium" else "b-low"
         html += f"""          <tr>
@@ -1004,7 +1004,7 @@ def _gen_pdf_html(out_path, report_type, now_vn=None):
 """
 
     # Add Yara rows
-    for y in yara_rules[:20]:
+    for y in yara_rules:
         pattern = (y.get('pattern', '')[:50] + '...') if len(y.get('pattern', '')) > 50 else y.get('pattern', '')
         risk_class = "b-critical" if y.get("risk_level") == "critical" else "b-high" if y.get("risk_level") == "high" else "b-medium" if y.get("risk_level") == "medium" else "b-low"
         html += f"""          <tr>
@@ -1050,7 +1050,7 @@ def _gen_pdf_html(out_path, report_type, now_vn=None):
 """
 
     # Add Malware rows
-    for m in mals[:25]:
+    for m in mals:
         mal_type = ', '.join(m.get('malware_types', [])[:2]) if m.get('malware_types') else 'N/A'
         aliases = ', '.join(m.get('aliases', [])[:1]) if m.get('aliases') else 'N/A'
         risk_class = "b-critical" if m.get("severity") == "critical" else "b-high" if m.get("severity") == "high" else "b-medium" if m.get("severity") == "medium" else "b-low"
@@ -1101,7 +1101,7 @@ def _gen_pdf_html(out_path, report_type, now_vn=None):
 """
 
     # Add Vulnerability rows
-    for v in vulns[:20]:
+    for v in vulns:
         cwe = v.get('weaknesses', ['N/A'])[0][:12] if v.get('weaknesses') else 'N/A'
         cisa = 'Yes' if v.get('cisa_exploit_add') else 'No'
         cvss = v.get('cvss_v3_score', v.get('cvss_score', 'N/A'))
