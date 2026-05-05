@@ -18,8 +18,38 @@ MAX_ITERATIONS = 12  # Tăng từ 5 lên 12 để đủ cho multi-step reasoning
 
 ollama.Client(host=OLLAMA_HOST)
 
-# System prompt cho Agent với enforced reasoning và quy trình 7 bước
-SYSTEM_PROMPT = """Bạn là AI Security Agent chuyên gia về Threat Intelligence. Phân tích mối đe dọa và trả lời theo format chuẩn.
+def _should_retry(tool_result: Dict, tool_name: str) -> bool:
+    """Check if should retry with different tool based on result."""
+    if not tool_result.get("success") and tool_result.get("count", 0) == 0:
+        # No results, can retry
+        return True
+    return False
+
+
+def _get_retry_tool(original_tool: str) -> str:
+    """Suggest next tool to try if current one returned no results."""
+    retry_map = {
+        "search_iocs": "search_malware",
+        "search_malware": "search_vulnerabilities",
+        "search_vulnerabilities": None  # No more retries after this
+    }
+    return retry_map.get(original_tool)
+
+
+def _build_system_prompt(store: Dict) -> str:
+    """Build dynamic system prompt with current database statistics."""
+    ioc_count = len(store.get("iocs", []))
+    mal_count = len(store.get("malwares", []))
+    vuln_count = len(store.get("vulnerabilities", []))
+    matches_count = len(store.get("matches", []))
+
+    return f"""Bạn là AI Security Agent chuyên gia về Threat Intelligence. Phân tích mối đe dọa và trả lời theo format chuẩn.
+
+DATABASE STATS:
+- IOC: {ioc_count} items
+- Malware: {mal_count} items
+- Vulnerabilities: {vuln_count} items
+- Device Matches: {matches_count} items
 
 TOOLS AVAILABLE:
 - search_iocs(query) — Tìm IOC trong database (hashes, domains, IPs, URLs)
@@ -524,7 +554,7 @@ def _execute_tool(tool_name: str, arguments: Dict[str, Any], store: Dict) -> Dic
             }
 
     elif tool_name == "check_memory":
-        from agents.memory_agent import load_memory, check_entity
+        from agents.memory_agent import load_memory, check_entity, search_past_investigations
 
         entity_name = arguments.get("entity_name", "")
         memory = store.get("_memory", {})
@@ -532,7 +562,21 @@ def _execute_tool(tool_name: str, arguments: Dict[str, Any], store: Dict) -> Dic
             memory = load_memory()
             store["_memory"] = memory
 
+        # Try exact match first
         result = check_entity(entity_name, memory)
+
+        # If not found, try semantic search
+        if not result["found"]:
+            similar = search_past_investigations(entity_name, memory, top_k=3)
+            if similar:
+                return {
+                    "success": True,
+                    "found": False,  # exact match not found
+                    "entity": entity_name,
+                    "history": None,
+                    "similar_investigations": similar  # fallback results
+                }
+
         return {
             "success": True,
             "found": result["found"],
@@ -604,15 +648,22 @@ def run_agent(user_query: str, store: Dict) -> Generator:
     ReAct loop: Reasoning → Acting → Observing
     Gửi từng bước về WebSocket
     Load memory đầu session để agent có context lâu dài
+    Includes self-correction when search tools return no results
     """
     # Load memory ngay đầu session
     from agents.memory_agent import load_memory
     store["_memory"] = load_memory()
 
+    # Build dynamic system prompt with current database stats
+    system_prompt = _build_system_prompt(store)
+
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_query}
     ]
+
+    last_tool_name = None
+    last_tool_result = None
 
     iteration = 0
     while iteration < MAX_ITERATIONS:
@@ -669,12 +720,30 @@ def run_agent(user_query: str, store: Dict) -> Generator:
                     try:
                         result = _execute_tool(tool_name, tool_args, store)
 
+                        # Track for self-correction
+                        last_tool_name = tool_name
+                        last_tool_result = result
+
                         # Thêm kết quả vào messages
                         messages.append({
                             "role": "assistant",
                             "content": "",
                             "tool_calls": [tool_call]
                         })
+
+                        # Self-correction: if search tool returned no results, suggest next tool
+                        if tool_name in ["search_iocs", "search_malware", "search_vulnerabilities"]:
+                            if _should_retry(result, tool_name):
+                                retry_tool = _get_retry_tool(tool_name)
+                                if retry_tool:
+                                    result["_self_correction"] = f"No results, try {retry_tool} instead"
+                                    yield {
+                                        "type": "self_correction",
+                                        "step": iteration,
+                                        "original_tool": tool_name,
+                                        "suggestion": f"No results with {tool_name}, suggesting {retry_tool}"
+                                    }
+
                         messages.append({
                             "role": "tool",
                             "content": json.dumps(result, ensure_ascii=False)

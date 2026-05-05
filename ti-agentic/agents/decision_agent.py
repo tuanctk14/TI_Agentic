@@ -128,12 +128,30 @@ def assess_risk(entity_name: str, entity_type: str, cvss_score: float,
     recommended_action = _generate_action(entity_name, entity_type, severity,
                                           affected_assets, cvss_score, enrichment_data)
 
+    # === CONFIDENCE SCORE ===
+    # Based on evidence count (number of scoring factors that triggered)
+    evidence_count = len(reasons)
+    if evidence_count >= 4:
+        confidence = 0.9
+    elif evidence_count == 3:
+        confidence = 0.75
+    elif evidence_count == 2:
+        confidence = 0.6
+    else:
+        confidence = 0.4
+
+    # Needs human review if we're alerting but confidence is low
+    needs_human_review = should_alert and confidence < 0.6
+
     return {
         "should_alert": should_alert,
         "severity": severity,
         "score": min(100, score),  # cap at 100
         "reasons": reasons,
         "recommended_action": recommended_action,
+        "confidence": confidence,
+        "needs_human_review": needs_human_review,
+        "evidence_count": evidence_count,
         "timestamp": datetime.now().isoformat()
     }
 
@@ -194,3 +212,63 @@ Reasons (brief, 1 sentence):"""
         pass  # Ollama offline, skip LLM reasoning
 
     return result
+
+
+def batch_assess(threats: list) -> dict:
+    """
+    Batch assess multiple threats and return prioritized list.
+
+    Args:
+        threats: list of threat dicts, each must have:
+            {
+                "entity_name": str,
+                "entity_type": str,
+                "cvss_score": float,
+                "affected_assets": list,
+                "memory_context": dict,
+                "enrichment_data": dict (optional)
+            }
+
+    Returns:
+        {
+            "total": int,
+            "alerts": int,
+            "human_review_needed": int,
+            "results": [sorted by priority: critical alerts, then high, then medium],
+            "summary": "X alerts | Y need human review"
+        }
+    """
+    results = []
+
+    for threat in threats:
+        assessment = assess_risk(
+            entity_name=threat.get("entity_name", "Unknown"),
+            entity_type=threat.get("entity_type", "Unknown"),
+            cvss_score=threat.get("cvss_score", 0),
+            affected_assets=threat.get("affected_assets", []),
+            memory_context=threat.get("memory_context", {}),
+            enrichment_data=threat.get("enrichment_data", {})
+        )
+        assessment["entity_name"] = threat.get("entity_name")
+        assessment["entity_type"] = threat.get("entity_type")
+        results.append(assessment)
+
+    # Sort by priority: critical alerts first, then high, then medium, then low
+    # Within same severity: high score first
+    severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    results.sort(key=lambda x: (
+        not x["should_alert"],  # alerts first
+        severity_order.get(x["severity"], 999),
+        -x["score"]  # higher score first
+    ))
+
+    alert_count = sum(1 for r in results if r["should_alert"])
+    human_review_count = sum(1 for r in results if r.get("needs_human_review", False))
+
+    return {
+        "total": len(threats),
+        "alerts": alert_count,
+        "human_review_needed": human_review_count,
+        "results": results,
+        "summary": f"{alert_count} alerts | {human_review_count} need human review"
+    }

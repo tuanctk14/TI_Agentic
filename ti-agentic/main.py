@@ -1206,6 +1206,49 @@ async def run_agent_endpoint(req: AgentQuery):
         return {"success":False,"error":str(e)[:200]}
 
 
+@app.post("/api/agent/batch")
+async def batch_assess_endpoint(req: dict):
+    """Batch assess multiple threats and return prioritized list."""
+    if not req.get("threats"):
+        return {"success": False, "error": "threats list required"}
+
+    if not _ollama_ok():
+        return {"success": False, "error": "Ollama offline"}
+
+    try:
+        from agents.decision_agent import batch_assess
+
+        threats = req.get("threats", [])
+        result = batch_assess(threats)
+        return {"success": True, "data": result}
+    except Exception as e:
+        return {"success": False, "error": str(e)[:200]}
+
+
+@app.get("/api/memory/similar")
+async def search_memory_endpoint(q: str = ""):
+    """Semantic search for similar past investigations."""
+    if not q or not q.strip():
+        return {"success": False, "error": "search query required"}
+
+    try:
+        from agents.memory_agent import search_past_investigations, load_memory
+
+        memory = store.get("_memory", {})
+        if not memory:
+            memory = load_memory()
+
+        results = search_past_investigations(q.strip(), memory, top_k=5)
+        return {
+            "success": True,
+            "query": q.strip(),
+            "count": len(results),
+            "results": results
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)[:200]}
+
+
 # WEBSOCKET CHAT
 @app.websocket("/ws/chat")
 async def chat_ws(websocket: WebSocket):
