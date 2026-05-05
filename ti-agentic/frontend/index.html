@@ -1165,7 +1165,7 @@ function malFiltered(){
   const s=document.getElementById('mal-sev').value;
   const t=document.getElementById('mal-type').value;
   let data=G.malwares.filter(m=>(!q||m.name?.toLowerCase().includes(q)||m.description?.toLowerCase().includes(q)||(m.aliases||[]).join(' ').toLowerCase().includes(q)||(m.malware_types||[]).join(' ').toLowerCase().includes(q)||(m.intrusion_sets||[]).join(' ').toLowerCase().includes(q)||(m.target_countries||[]).join(' ').toLowerCase().includes(q)||(m.target_sectors||[]).join(' ').toLowerCase().includes(q))&&(!s||m.severity===s)&&(!t||(m.malware_types||[]).some(mt=>mt.includes(t))));
-  data.sort((a,b)=>{let av=a[malSC]??'',bv=b[malSC]??'';if(malSC==='severity'){av=ro(av);bv=ro(bv);}else if(malSC==='confidence'){av=+av||0;bv=+bv||0;}else if(['created','modified','created_at','updated_at'].includes(malSC)){av=new Date(av||'');bv=new Date(bv||'');}else if(['malware_types','intrusion_sets','target_countries','target_sectors'].includes(malSC)){av=(av||[]).join(',');bv=(bv||[]).join(',');}const c=typeof av==='number'?av-bv:av instanceof Date&&bv instanceof Date?av-bv:String(av).localeCompare(String(bv));return malSD==='asc'?c:-c;});
+  data.sort((a,b)=>{let av=a[malSC]??'',bv=b[malSC]??'';if(malSC==='severity'){av=ro(av);bv=ro(bv);}else if(malSC==='confidence'){av=+av||0;bv=+bv||0;}else if(['created','modified','created_at','updated_at','modification_date','original_creation_date'].includes(malSC)){av=new Date(av||'');bv=new Date(bv||'');}else if(['malware_types','intrusion_sets','target_countries','target_sectors'].includes(malSC)){av=(av||[]).join(',');bv=(bv||[]).join(',');}const c=typeof av==='number'?av-bv:av instanceof Date&&bv instanceof Date?av-bv:String(av).localeCompare(String(bv));return malSD==='asc'?c:-c;});
   return data;
 }
 function malSort(col){if(malSC===col)malSD=malSD==='asc'?'desc':'asc';else{malSC=col;malSD='asc';}malPage=1;renderMal();document.querySelectorAll('#mal-tbl th').forEach(th=>{th.classList.remove('sa','sd');if(th.dataset.c===col)th.classList.add('s'+malSD[0]);});}
@@ -1184,8 +1184,8 @@ function renderMal(){
       '<td><div style="font-size:11px">'+intrusionSets+'</div></td>' +
       '<td><div style="font-size:11px">'+targetCountries+'</div></td>' +
       '<td><div style="font-size:11px">'+targetSectors+'</div></td>' +
-      '<td><div class="dt-block"><div class="dt-label">Ngày tạo ban đầu</div><div class="dt-value" style="font-size:11px">'+fmtDateFull((m.created||m.created_at||''))+'</div></div></td>' +
-      '<td><div class="dt-block"><div class="dt-label">Ngày chỉnh sửa</div><div class="dt-value" style="font-size:11px">'+fmtDateFull((m.modified||m.updated_at||''))+'</div></div></td>' +
+      '<td><div class="dt-block"><div class="dt-label">Ngày tạo ban đầu</div><div class="dt-value" style="font-size:11px">'+fmtDateFull((m.original_creation_date||m.created_at||''))+'</div></div></td>' +
+      '<td><div class="dt-block"><div class="dt-label">Ngày chỉnh sửa</div><div class="dt-value" style="font-size:11px">'+fmtDateFull((m.modification_date||m.created_at||''))+'</div></div></td>' +
       '<td class="desc"><span class="td-clip">'+(m.description||'N/A')+'</span></td>' +
       '</tr>';
   }).join(''):`<tr><td colspan="7" class="empty-row">Không có dữ liệu</td></tr>`;
