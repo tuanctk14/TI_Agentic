@@ -83,9 +83,37 @@ def _load_from_cache():
             meta = json.loads(meta_file.read_text(encoding='utf-8'))
             store["last_update"] = meta.get("last_sync", "")
 
-        print(f"📦 Loaded from cache | IOC:{len(store['iocs'])} Mal:{len(store['malwares'])} Vuln:{len(store['vulnerabilities'])}")
+        matches_file = cache_dir / "matches.json"
+        if matches_file.exists():
+            with open(matches_file, encoding='utf-8') as f:
+                store["matches"] = json.load(f)
+
+        print(f"📦 Loaded from cache | IOC:{len(store['iocs'])} Mal:{len(store['malwares'])} Vuln:{len(store['vulnerabilities'])} Matches:{len(store.get('matches', []))}")
     except Exception as e:
         print(f"⚠️ Cache load error: {e}")
+
+def _save_to_cache():
+    """Save all external data to cache files for persistence"""
+    try:
+        cache_dir = Path("cache")
+        cache_dir.mkdir(exist_ok=True)
+
+        with open(cache_dir / "iocs.json", "w", encoding='utf-8') as f:
+            json.dump(store["iocs"], f, ensure_ascii=False)
+        with open(cache_dir / "malwares.json", "w", encoding='utf-8') as f:
+            json.dump(store["malwares"], f, ensure_ascii=False)
+        with open(cache_dir / "vulnerabilities.json", "w", encoding='utf-8') as f:
+            json.dump(store["vulnerabilities"], f, ensure_ascii=False)
+        with open(cache_dir / "matches.json", "w", encoding='utf-8') as f:
+            json.dump(store.get("matches", []), f, ensure_ascii=False)
+
+        meta = {"last_sync": store["last_update"], "source": store["source"]}
+        with open(cache_dir / "metadata.json", "w", encoding='utf-8') as f:
+            json.dump(meta, f, ensure_ascii=False)
+
+        print(f"💾 Saved to cache | IOC:{len(store['iocs'])} Mal:{len(store['malwares'])} Vuln:{len(store['vulnerabilities'])} Matches:{len(store.get('matches', []))}")
+    except Exception as e:
+        print(f"⚠️ Cache save error: {e}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -162,6 +190,8 @@ def _refresh():
         print(f"\n✅ Refresh OK")
         print(f"   IOC: {len(all_iocs)} | Malware: {len(store['malwares'])} | Vuln: {len(all_vulns)} | Matches: {len(matches)}")
         print(f"   Nguon: {store['source']}")
+
+        _save_to_cache()
 
     except Exception as e:
         print(f"\n❌ Refresh error: {e}")
