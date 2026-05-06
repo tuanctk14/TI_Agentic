@@ -1279,7 +1279,14 @@ async def chat_ws(websocket: WebSocket):
             try:
                 # Chay AI Agent
                 for event in run_agent(msg, store):
-                    if event["type"] == "reasoning":
+                    if event["type"] == "intent":
+                        await websocket.send_json({
+                            "type": "intent",
+                            "intent": event.get("intent"),
+                            "entities": event.get("entities", {}),
+                            "confidence": event.get("confidence", 0)
+                        })
+                    elif event["type"] == "reasoning":
                         await websocket.send_json({
                             "type": "reasoning",
                             "step": event.get("step", 1),

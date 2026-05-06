@@ -1,10 +1,12 @@
 """
 AI Agent Brain — ReAct pattern với Ollama tool calling
 Hỗ trợ Threat Intelligence analysis tự động
+Bao gồm Intent Detection để phân biệt câu hỏi thường vs TI queries
 """
 import json
 import ollama
 import os
+import re as _re
 from typing import Generator, Dict, Any, List
 from datetime import datetime
 from dotenv import load_dotenv
@@ -17,6 +19,177 @@ MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
 MAX_ITERATIONS = 12  # Tăng từ 5 lên 12 để đủ cho multi-step reasoning + tools
 
 ollama.Client(host=OLLAMA_HOST)
+
+# ══════════════════════════════════════════════════════════════
+# INTENT DETECTION — Phân loại câu hỏi trước khi chạy agent
+# ══════════════════════════════════════════════════════════════
+
+# Pattern nhận diện CVE
+_CVE_PATTERN = _re.compile(r'\bCVE-\d{4}-\d{4,7}\b', _re.IGNORECASE)
+
+# Pattern nhận diện IP
+_IP_PATTERN = _re.compile(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b')
+
+# Pattern nhận diện hash (MD5/SHA1/SHA256)
+_HASH_PATTERN = _re.compile(r'\b[a-fA-F0-9]{32,64}\b')
+
+# Từ khóa TI liên quan lỗ hổng/CVE/IOC — tiếng Việt ưu tiên
+_VULN_KEYWORDS = {
+    # ── Tiếng Việt ──
+    "lỗ hổng", "lỗ hổng bảo mật", "lỗ hổng này", "lỗ hổng đó",
+    "cve", "cvss", "khai thác", "bị khai thác", "vá lỗi", "vá ngay",
+    "mức độ nguy hiểm", "nguy hiểm không", "nghiêm trọng không",
+    "ảnh hưởng gì", "ảnh hưởng đến", "bị dính", "dính lỗ hổng",
+    "ioc", "hash", "phishing", "giả mạo", "địa chỉ ip độc",
+    "leo thang đặc quyền", "chiếm quyền", "vượt xác thực",
+    "chèn lệnh", "thực thi mã", "rce", "sqli", "xss", "injection",
+    "poc", "exploit", "zero-day", "zero day", "patch",
+    # ── Tiếng Anh ──
+    "vulnerability", "vulnerabilities", "high severity", "critical severity",
+    "breach", "compromised", "log4j", "log4shell", "eternalblue",
+    "spring4shell", "shellshock", "heartbleed", "bluekeep",
+    "privilege escalation", "buffer overflow",
+}
+
+# Từ khóa TI liên quan malware — tách riêng để detect chính xác hơn
+_MALWARE_KEYWORDS = {
+    # ── Tiếng Việt ──
+    "mã độc", "phần mềm độc hại", "nhiễm mã độc", "bị nhiễm",
+    "virus", "diệt virus", "quét virus", "loại bỏ mã độc",
+    "ransomware", "mã hóa dữ liệu", "tống tiền", "bị mã hóa",
+    "trojan", "backdoor", "cửa hậu", "rootkit",
+    "botnet", "worm", "sâu máy tính", "spyware", "keylogger",
+    "theo dõi bàn phím", "dropper", "loader", "payload",
+    "malware này", "malware đó", "loại malware", "họ malware",
+    "phát tán", "lây lan", "lây nhiễm", "lây qua",
+    "dọn sạch", "cách ly", "quarantine",
+    "c2", "máy chủ điều khiển", "apt", "nhóm hacker",
+    "tấn công có chủ đích", "chiến dịch tấn công",
+    # ── Tiếng Anh ──
+    "malware", "ransomware family", "malware family", "malware sample",
+    "rat", "remote access trojan", "infostealer", "banking trojan",
+    "cryptominer", "cryptojacking", "adware", "worm",
+    "emotet", "lockbit", "blackcat", "plugx", "remcos", "cobalt strike",
+    "lateral movement", "persistence", "exfiltration",
+    "wannacry", "notpetya", "lazarus",
+}
+
+# Từ khóa TI liên quan thiết bị/asset — tiếng Việt ưu tiên
+_DEVICE_KEYWORDS = {
+    # ── Tiếng Việt (nhóm chính) ──
+    "thiết bị", "thiết bị nào", "thiết bị đó", "thiết bị này",
+    "máy chủ", "máy tính", "máy nào", "máy đó",
+    "đang dính gì", "đang bị gì", "có vấn đề gì",
+    "bị ảnh hưởng không", "có lỗ hổng không", "đang có nguy cơ",
+    "kiểm tra thiết bị", "phân tích thiết bị", "xem thiết bị",
+    "danh sách thiết bị", "liệt kê thiết bị", "thiết bị nguy hiểm",
+    "lịch sử thiết bị", "lịch sử alert", "lịch sử nguy cơ",
+    "nguy cơ", "rủi ro", "mức rủi ro",
+    "địa chỉ ip", "ip này", "ip đó",
+    # ── Tiếng Anh (bổ sung) ──
+    "device", "which device", "affected device", "device risk",
+    "device history", "device alert", "check device",
+    "host", "hostname", "asset", "endpoint", "server",
+}
+
+# Keyword tổng hợp TI (nếu khớp ít nhất 1 là TI query)
+_TI_GENERAL_KEYWORDS = {
+    "opencti", "nvd", "nist", "mitre", "att&ck", "ttps",
+    "indicator of compromise", "threat intelligence",
+    "tình báo mối đe dọa", "phân tích mối đe dọa",
+    "security alert", "cảnh báo bảo mật", "matches",
+    "so khớp", "matching",
+}
+
+# Pattern nhận diện tên malware phổ biến
+_MALWARE_NAME_PATTERN = _re.compile(
+    r'\b(LockBit|BlackCat|Emotet|PlugX|Remcos|WannaCry|NotPetya|Lazarus|'
+    r'CobaltStrike|Mimikatz|Cobalt Strike|REvil|Conti|BlackMatter|'
+    r'AsyncRAT|NjRAT|QuasarRAT|AgentTesla|FormBook|RedLine)\b',
+    _re.IGNORECASE
+)
+
+
+def _detect_intent(query: str) -> dict:
+    """
+    Phân tích câu hỏi và trả về intent + extracted entities.
+
+    Returns:
+    {
+        "intent": "normal" | "ti_vuln" | "ti_malware" | "ti_device" | "ti_general",
+        "entities": {
+            "cves": [...],
+            "ips": [...],
+            "hashes": [...],
+            "malware_names": [...],
+            "device_hints": [],
+            "keywords": [],
+        },
+        "confidence": float
+    }
+    """
+    q_lower = query.lower().strip()
+
+    # Extract entities
+    cves    = _CVE_PATTERN.findall(query)
+    ips     = _IP_PATTERN.findall(query)
+    hashes  = _HASH_PATTERN.findall(query)
+
+    found_vuln_kw    = [kw for kw in _VULN_KEYWORDS    if kw in q_lower]
+    found_malware_kw = [kw for kw in _MALWARE_KEYWORDS if kw in q_lower]
+    found_device_kw  = [kw for kw in _DEVICE_KEYWORDS  if kw in q_lower]
+    found_ti_kw      = [kw for kw in _TI_GENERAL_KEYWORDS if kw in q_lower]
+
+    malware_names = _MALWARE_NAME_PATTERN.findall(query)
+
+    # ── Scoring ──
+    score_vuln    = len(cves) * 3 + len(hashes) * 2 + len(found_vuln_kw)
+    score_malware = len(malware_names) * 3 + len(found_malware_kw)
+    score_device  = len(ips)  * 2 + len(found_device_kw)
+    score_ti      = len(found_ti_kw)
+
+    total_ti = score_vuln + score_malware + score_device + score_ti
+
+    # ── Quyết định intent ──
+    if total_ti == 0:
+        intent     = "normal"
+        confidence = 0.95
+    elif score_device > max(score_vuln, score_malware):
+        intent     = "ti_device"
+        confidence = min(0.95, 0.5 + score_device * 0.1)
+    elif score_malware > score_vuln:
+        intent     = "ti_malware"
+        confidence = min(0.95, 0.5 + score_malware * 0.1)
+    elif score_vuln > 0 or cves:
+        intent     = "ti_vuln"
+        confidence = min(0.95, 0.5 + score_vuln * 0.1)
+    else:
+        intent     = "ti_general"
+        confidence = min(0.85, 0.4 + score_ti * 0.15)
+
+    # Extract device hints
+    device_hints = []
+    if intent in ("ti_device", "ti_general", "ti_malware"):
+        hostname_pattern = _re.compile(r'\b([a-zA-Z][a-zA-Z0-9\-]{2,}(?:\d+|[-][a-zA-Z0-9]+))\b')
+        candidates = hostname_pattern.findall(query)
+        skip = {"the", "and", "for", "not", "this", "that", "with",
+                "có", "và", "không", "trong", "nào", "bị", "đang",
+                "CVE", "NVD", "IOC", "TI", "APT", "server", "device"}
+        device_hints = [c for c in candidates if c not in skip][:3]
+
+    return {
+        "intent": intent,
+        "entities": {
+            "cves":          [c.upper() for c in cves],
+            "ips":           ips,
+            "hashes":        hashes,
+            "malware_names": [m for m in malware_names],
+            "device_hints":  device_hints,
+            "keywords":      found_vuln_kw + found_malware_kw + found_device_kw + found_ti_kw,
+        },
+        "confidence": confidence,
+    }
+
 
 def _should_retry(tool_result: Dict, tool_name: str) -> bool:
     """Check if should retry with different tool based on result."""
@@ -643,23 +816,236 @@ def _execute_tool(tool_name: str, arguments: Dict[str, Any], store: Dict) -> Dic
         }
 
 
+def _run_normal_chat(query: str) -> Generator:
+    """Flow cho câu hỏi thường — Ollama trả lời trực tiếp, không gọi tool."""
+    try:
+        response = ollama.chat(
+            model=MODEL,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Bạn là AI assistant thông minh, am hiểu về bảo mật thông tin và công nghệ. "
+                        "Trả lời bằng tiếng Việt, ngắn gọn và dễ hiểu. "
+                        "Nếu user hỏi bằng tiếng Anh thì trả lời tiếng Anh. "
+                        "Không đề cập đến database threat intelligence hay tools nội bộ."
+                    )
+                },
+                {"role": "user", "content": query}
+            ],
+            stream=False
+        )
+        yield {
+            "type": "final",
+            "step": 1,
+            "content": response.message.content or "Xin lỗi, tôi không thể trả lời câu hỏi này."
+        }
+    except Exception as e:
+        yield {"type": "error", "step": 1, "error": f"Lỗi Ollama: {str(e)}"}
+
+
+def _build_vuln_query(entities: dict, original_query: str) -> str:
+    """Sinh câu hỏi tối ưu cho TI vuln flow dựa trên entities đã extract."""
+    if entities["cves"]:
+        return f"Phân tích {' và '.join(entities['cves'])}: tìm thông tin, thiết bị bị ảnh hưởng, khuyến nghị xử lý"
+    elif entities["hashes"]:
+        return f"Tìm IOC hash {entities['hashes'][0]} trong database, xác định mức độ nguy hiểm và thiết bị liên quan"
+    elif entities["ips"]:
+        return f"Tìm IOC IP {entities['ips'][0]}, kiểm tra có phải C2 hay malicious IP không"
+    else:
+        return original_query
+
+
+def _build_malware_query(entities: dict, original_query: str) -> str:
+    """Sinh câu hỏi tối ưu cho TI malware flow."""
+    if entities.get("malware_names"):
+        names = " và ".join(entities["malware_names"][:2])
+        return (
+            f"Phân tích malware {names}: "
+            f"tìm thông tin chi tiết, loại malware, mức độ nguy hiểm, "
+            f"thiết bị nào đang bị match/lây nhiễm, lịch sử phát hiện, "
+            f"khuyến nghị xử lý và các IOC liên quan"
+        )
+    elif entities.get("hashes"):
+        return f"Tìm và phân tích IOC hash {entities['hashes'][0]}: xác định malware liên quan, thiết bị bị ảnh hưởng"
+    else:
+        return (
+            f"Phân tích yêu cầu về malware: {original_query}. "
+            f"Tìm malware liên quan trong database, thiết bị bị match, lịch sử phát hiện"
+        )
+
+
+def _build_device_query(entities: dict, original_query: str) -> str:
+    """Sinh câu hỏi tối ưu cho TI device flow."""
+    if entities["ips"]:
+        return f"Phân tích thiết bị có IP {entities['ips'][0]}: liệt kê tất cả threats đang match, lịch sử alert, mức độ rủi ro"
+    elif entities["device_hints"]:
+        hint = entities["device_hints"][0]
+        return f"Phân tích thiết bị '{hint}': tìm tất cả IOC, CVE, malware đang match, lịch sử nguy cơ, khuyến nghị"
+    else:
+        return (
+            "Liệt kê top thiết bị nguy hiểm nhất hiện tại: "
+            "thiết bị có nhiều matches nhất, mức risk cao nhất, "
+            "và các lỗ hổng chưa được xử lý"
+        )
+
+
+def _build_intent_system_prompt(intent: str, entities: dict, store: dict) -> str:
+    """Sinh system prompt chuyên biệt theo intent."""
+    ioc_count   = len(store.get("iocs", []))
+    mal_count   = len(store.get("malwares", []))
+    vuln_count  = len(store.get("vulnerabilities", []))
+    match_count = len(store.get("matches", []))
+    last_update = store.get("last_update", "chưa cập nhật")
+
+    db_context = (
+        f"DATABASE (cập nhật: {last_update}): "
+        f"IOC={ioc_count} | Malware={mal_count} | CVE={vuln_count} | Matches={match_count}"
+    )
+
+    if intent == "ti_vuln":
+        cve_hint = ""
+        if entities.get("cves"):
+            cve_hint = f"\nCVE CẦN PHÂN TÍCH: {', '.join(entities['cves'])}"
+        if entities.get("hashes"):
+            cve_hint += f"\nHASH CẦN KIỂM TRA: {', '.join(entities['hashes'])}"
+        if entities.get("ips"):
+            cve_hint += f"\nIP CẦN KIỂM TRA: {', '.join(entities['ips'])}"
+
+        return f"""Bạn là AI Security Analyst chuyên phân tích lỗ hổng bảo mật.
+{db_context}{cve_hint}
+
+QUY TRÌNH BẮT BUỘC:
+1. search_vulnerabilities(query) HOẶC search_iocs(query)
+2. Nếu CVE và CVSS=0: enrich_vulnerability(cve_id)
+3. get_device_matches(threat_name)
+4. check_memory(entity_name)
+5. Nếu CVSS>=7 và có thiết bị: create_alert(...)
+6. save_investigation(...)
+
+OUTPUT: 🔍 Thông tin | 🖥️ Thiết bị | 📋 Lịch sử | ⚠️ Đánh giá | 💡 Khuyến nghị
+
+Trả lời bằng ngôn ngữ giống câu hỏi của user."""
+
+    elif intent == "ti_malware":
+        malware_hint = ""
+        if entities.get("malware_names"):
+            malware_hint = f"\nMALWARE: {', '.join(entities['malware_names'])}"
+        if entities.get("hashes"):
+            malware_hint += f"\nHASH: {', '.join(entities['hashes'])}"
+
+        return f"""Bạn là AI Security Analyst chuyên phân tích mã độc.
+{db_context}{malware_hint}
+
+QUY TRÌNH BẮT BUỘC:
+1. search_malware(query)
+2. search_iocs(query) nếu có hash
+3. get_device_matches(malware_name)
+4. check_memory(malware_name)
+5. correlate_threats(malware_name)
+6. create_alert(...) nếu cần
+
+OUTPUT: 🦠 Thông tin | 🎯 Kỹ thuật | 🖥️ Thiết bị | 🔗 IOC | 📋 Lịch sử | 💡 Khuyến nghị
+
+Trả lời bằng tiếng Việt. Nếu user hỏi tiếng Anh thì trả lời tiếng Anh."""
+
+    elif intent == "ti_device":
+        device_hint = ""
+        if entities.get("ips"):
+            device_hint = f"\nTHIẾT BỊ: IP {', '.join(entities['ips'])}"
+        elif entities.get("device_hints"):
+            device_hint = f"\nTHIẾT BỊ: {', '.join(entities['device_hints'])}"
+
+        return f"""Bạn là AI Security Analyst chuyên phân tích rủi ro thiết bị.
+{db_context}{device_hint}
+
+QUY TRÌNH BẮT BUỘC:
+1. get_device_matches(device_name)
+2. check_memory(device_name)
+3. search_vulnerabilities() hoặc search_iocs() cho mỗi threat
+4. analyze_device(device_name) nếu có nhiều threat
+5. create_alert(...) nếu nguy cơ cao
+
+OUTPUT: 🖥️ Thông tin | 🚨 Threats | 📋 Lịch sử | 🔒 CVE | 💡 Ưu tiên
+
+Trả lời bằng ngôn ngữ giống câu hỏi của user."""
+
+    else:  # ti_general
+        return _build_system_prompt(store)
+
+
 def run_agent(user_query: str, store: Dict) -> Generator:
     """
-    ReAct loop: Reasoning → Acting → Observing
-    Gửi từng bước về WebSocket
-    Load memory đầu session để agent có context lâu dài
-    Includes self-correction when search tools return no results
+    Entry point chính — tự phát hiện intent và chạy flow phù hợp.
+
+    Flow:
+      normal   → _run_normal_chat()  (không gọi tool)
+      ti_vuln  → ReAct loop với focus vào vuln/IOC analysis
+      ti_device → ReAct loop với focus vào device analysis
+      ti_general → ReAct loop đầy đủ (behavior hiện tại)
     """
-    # Load memory ngay đầu session
+    # Load memory đầu session
     from agents.memory_agent import load_memory
     store["_memory"] = load_memory()
 
-    # Build dynamic system prompt with current database stats
-    system_prompt = _build_system_prompt(store)
+    # ── BƯỚC 1: Detect intent ──
+    intent_result = _detect_intent(user_query)
+    intent   = intent_result["intent"]
+    entities = intent_result["entities"]
+    confidence = intent_result["confidence"]
+
+    # Thông báo intent cho frontend
+    yield {
+        "type": "intent",
+        "intent": intent,
+        "entities": entities,
+        "confidence": confidence
+    }
+
+    # ── BƯỚC 2: Normal chat — thoát ngay, không gọi tool ──
+    if intent == "normal":
+        yield from _run_normal_chat(user_query)
+        return
+
+    # ── BƯỚC 3: TI flow — chuẩn bị query và system prompt ──
+    if intent == "ti_vuln":
+        effective_query = _build_vuln_query(entities, user_query)
+        yield {
+            "type": "reasoning",
+            "step": 0,
+            "content": "Phát hiện câu hỏi về lỗ hổng bảo mật. Đang tìm kiếm thông tin..."
+        }
+
+    elif intent == "ti_malware":
+        effective_query = _build_malware_query(entities, user_query)
+        yield {
+            "type": "reasoning",
+            "step": 0,
+            "content": "Phát hiện câu hỏi về mã độc. Đang phân tích malware..."
+        }
+
+    elif intent == "ti_device":
+        effective_query = _build_device_query(entities, user_query)
+        yield {
+            "type": "reasoning",
+            "step": 0,
+            "content": "Phát hiện câu hỏi về thiết bị. Đang phân tích..."
+        }
+
+    else:  # ti_general
+        effective_query = user_query
+        yield {
+            "type": "reasoning",
+            "step": 0,
+            "content": "Đang phân tích yêu cầu..."
+        }
+
+    # ── BƯỚC 4: Xây dựng system prompt theo intent ──
+    system_prompt = _build_intent_system_prompt(intent, entities, store)
 
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_query}
+        {"role": "user",   "content": effective_query}
     ]
 
     last_tool_name = None
