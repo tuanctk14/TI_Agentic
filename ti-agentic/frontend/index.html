@@ -1292,28 +1292,31 @@ function initChat(){
         }
         else if(data.type==='alert'){
           hideTyping();
+          // Sanitize message - remove HTML tags
+          const sanitize = (str) => String(str).replace(/[<>]/g, ch => ({'>':'&gt;','<':'&lt;'}[ch]||ch));
           addMsg('alert',`
             <div style="padding:10px;border-radius:8px;border:1px solid #dc2626;background:#fee2e2">
-              <b style="color:#991b1b">🚨 ALERT [${(data.severity||'HIGH').toUpperCase()}]</b><br>
+              <b style="color:#991b1b">🚨 ALERT [${sanitize(data.severity||'HIGH').toUpperCase()}]</b><br>
               <div style="margin-top:6px;font-size:13px">
-                <b>${data.threat||'?'}</b><br>
-                <span style="color:#666">Assets:</span> ${(data.assets||[]).join(', ')||'N/A'}<br>
-                <span style="color:#991b1b;font-weight:bold">${data.message||'Review immediately'}</span>
+                <b>${sanitize(data.threat||'?')}</b><br>
+                <span style="color:#666">Assets:</span> ${(data.assets||[]).map(a=>sanitize(a)).join(', ')||'N/A'}<br>
+                <span style="color:#991b1b;font-weight:bold">${sanitize(data.message||'Review immediately')}</span>
               </div>
             </div>
           `);
         }
         else if(data.type==='memory_recall'){
           hideTyping();
+          const sanitize = (str) => String(str).replace(/[<>]/g, ch => ({'>':'&gt;','<':'&lt;'}[ch]||ch));
           const hist=data.history||{};
-          const summary = hist.action_taken ? `(${hist.action_taken})` : '';
-          addMsg('memory',`📚 <b>${data.entity}</b> ${summary}`);
+          const summary = hist.action_taken ? `(${sanitize(hist.action_taken)})` : '';
+          addMsg('memory',`📚 <b>${sanitize(data.entity)}</b> ${summary}`);
         }
         else if(data.type==='message'){
           hideTyping();addMsg('ai',data.content);
         }
         else if(data.type==='error'){
-          hideTyping();addMsg('warn','❌ '+data.content);
+          hideTyping();const sanitize = (str) => String(str).replace(/[<>]/g, ch => ({'>':'&gt;','<':'&lt;'}[ch]||ch));addMsg('warn','❌ '+sanitize(data.content));
         }
       }catch{hideTyping();addMsg('ai',e.data);}
     };
