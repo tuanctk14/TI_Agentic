@@ -923,9 +923,17 @@ QUY TRÌNH BẮT BUỘC:
 5. Nếu CVSS>=7 và có thiết bị: create_alert(...)
 6. save_investigation(...)
 
-OUTPUT: 🔍 Thông tin | 🖥️ Thiết bị | 📋 Lịch sử | ⚠️ Đánh giá | 💡 Khuyến nghị
+ĐỊNH DẠNG RESPONSE:
+- KHÔNG dùng HTML tags, CSS, hoặc ký tự <>
+- Dùng text đơn giản, emoji để format
+- Mỗi phần trên một dòng riêng
+- Ví dụ:
+  🔍 Thông tin: CVE-YYYY-NNNNN — CVSS X.X — [mô tả]
+  🖥️ Thiết bị: [danh sách hoặc N/A]
+  ⚠️ Đánh giá: [mức độ] — [lý do]
+  💡 Khuyến nghị: [hành động]
 
-Trả lời bằng ngôn ngữ giống câu hỏi của user."""
+Trả lời bằng ngôn ngữ giống câu hỏi của user. TUYỆT ĐỐI KHÔNG OUTPUT HTML."""
 
     elif intent == "ti_malware":
         malware_hint = ""
@@ -945,7 +953,11 @@ QUY TRÌNH BẮT BUỘC:
 5. correlate_threats(malware_name)
 6. create_alert(...) nếu cần
 
-OUTPUT: 🦠 Thông tin | 🎯 Kỹ thuật | 🖥️ Thiết bị | 🔗 IOC | 📋 Lịch sử | 💡 Khuyến nghị
+ĐỊNH DẠNG RESPONSE:
+- KHÔNG dùng HTML tags, CSS, hoặc ký tự <>
+- Dùng text đơn giản, emoji để format
+- Mỗi phần trên một dòng riêng
+- TUYỆT ĐỐI KHÔNG OUTPUT HTML
 
 Trả lời bằng tiếng Việt. Nếu user hỏi tiếng Anh thì trả lời tiếng Anh."""
 
@@ -966,7 +978,11 @@ QUY TRÌNH BẮT BUỘC:
 4. analyze_device(device_name) nếu có nhiều threat
 5. create_alert(...) nếu nguy cơ cao
 
-OUTPUT: 🖥️ Thông tin | 🚨 Threats | 📋 Lịch sử | 🔒 CVE | 💡 Ưu tiên
+ĐỊNH DẠNG RESPONSE:
+- KHÔNG dùng HTML tags, CSS, hoặc ký tự <>
+- Dùng text đơn giản, emoji để format
+- Mỗi phần trên một dòng riêng
+- TUYỆT ĐỐI KHÔNG OUTPUT HTML
 
 Trả lời bằng ngôn ngữ giống câu hỏi của user."""
 
