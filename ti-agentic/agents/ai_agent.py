@@ -912,17 +912,20 @@ def _build_intent_system_prompt(intent: str, entities: dict, store: dict) -> str
         if entities.get("ips"):
             cve_hint += f"\nIP CẦN KIỂM TRA: {', '.join(entities['ips'])}"
 
-        return f"""Bạn là Security Analyst phân tích lỗ hổng bảo mật.
+        return f"""Security Analyst analyzing vulnerability.
 {db_context}{cve_hint}
 
-BƯỚC 1: Tìm CVE bằng search_vulnerabilities hoặc search_iocs
-BƯỚC 2: Nếu cần dữ liệu NVD thêm: gọi enrich_vulnerability
-BƯỚC 3: Kiểm tra thiết bị bị ảnh hưởng: get_device_matches
-BƯỚC 4: Kiểm tra lịch sử: check_memory
-BƯỚC 5: Nếu nguy cơ cao: create_alert
-BƯỚC 6: Lưu điều tra: save_investigation
+TOOLS AVAILABLE: search_vulnerabilities, search_iocs, enrich_vulnerability, get_device_matches, check_memory, create_alert, save_investigation
 
-CHÚ Ý: KHÔNG dùng HTML, CSS, hay ký tự <>. Chỉ dùng text + emoji."""
+STEPS:
+1. search_vulnerabilities(query) to find CVE
+2. If needed, enrich_vulnerability(cve_id) for NVD data
+3. get_device_matches(threat_name) to find affected devices
+4. check_memory(entity_name) for history
+5. create_alert(...) if high risk
+6. save_investigation(...) to save findings
+
+Output plain text with emoji, no HTML or <>."""
 
     elif intent == "ti_malware":
         malware_hint = ""
@@ -931,17 +934,20 @@ CHÚ Ý: KHÔNG dùng HTML, CSS, hay ký tự <>. Chỉ dùng text + emoji."""
         if entities.get("hashes"):
             malware_hint += f"\nHASH: {', '.join(entities['hashes'])}"
 
-        return f"""Bạn là Security Analyst phân tích mã độc.
+        return f"""Security Analyst analyzing malware.
 {db_context}{malware_hint}
 
-BƯỚC 1: Tìm malware: search_malware
-BƯỚC 2: Tìm IOC liên quan: search_iocs nếu có hash
-BƯỚC 3: Kiểm tra thiết bị: get_device_matches
-BƯỚC 4: Lịch sử: check_memory
-BƯỚC 5: Liên hệ: correlate_threats
-BƯỚC 6: Alert nếu cần: create_alert
+TOOLS AVAILABLE: search_malware, search_iocs, get_device_matches, check_memory, correlate_threats, create_alert, save_investigation
 
-CHÚ Ý: KHÔNG dùng HTML, CSS, hay <>. Chỉ text + emoji."""
+STEPS:
+1. search_malware(query) to find malware
+2. search_iocs(query) for related IOCs/hashes
+3. get_device_matches(malware_name) for affected devices
+4. check_memory(malware_name) for history
+5. correlate_threats(malware_name) for relationships
+6. create_alert(...) if needed
+
+Output plain text with emoji, no HTML or <>."""
 
     elif intent == "ti_device":
         device_hint = ""
@@ -950,16 +956,19 @@ CHÚ Ý: KHÔNG dùng HTML, CSS, hay <>. Chỉ text + emoji."""
         elif entities.get("device_hints"):
             device_hint = f"\nTHIẾT BỊ: {', '.join(entities['device_hints'])}"
 
-        return f"""Bạn là Security Analyst phân tích rủi ro thiết bị.
+        return f"""Security Analyst analyzing device risk.
 {db_context}{device_hint}
 
-BƯỚC 1: Lấy threats của thiết bị: get_device_matches
-BƯỚC 2: Kiểm tra lịch sử: check_memory
-BƯỚC 3: Chi tiết mỗi threat: search_vulnerabilities, search_iocs
-BƯỚC 4: Phân tích ATT&CK: analyze_device
-BƯỚC 5: Alert nếu nguy cơ cao: create_alert
+TOOLS AVAILABLE: get_device_matches, check_memory, search_vulnerabilities, search_iocs, analyze_device, create_alert, save_investigation
 
-CHÚ Ý: KHÔNG dùng HTML, CSS, hay <>. Chỉ text + emoji."""
+STEPS:
+1. get_device_matches(device_name) to list all threats on device
+2. check_memory(device_name) for history and alerts
+3. search_vulnerabilities or search_iocs for threat details
+4. analyze_device(device_name) for ATT&CK analysis
+5. create_alert(...) if high risk
+
+Output plain text with emoji, no HTML or <>."""
 
     else:  # ti_general
         return _build_system_prompt(store)
