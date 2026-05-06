@@ -1273,9 +1273,14 @@ function initChat(){
       try{
         const data=JSON.parse(e.data);
         if(data.type==='welcome'){hideTyping();addMsg('sys',data.content);}
+        else if(data.type==='intent'){
+          // Hide intent detection - internal use only
+          // console.log('Intent:', data.intent, 'Confidence:', data.confidence);
+        }
         else if(data.type==='reasoning'){
+          // Hide reasoning steps - only show final result
           hideTyping();
-          addMsg('reasoning',`🧠 ${data.content}`);
+          // addMsg('reasoning',`🧠 ${data.content}`);
         }
         else if(data.type==='thinking'){
           hideTyping();
