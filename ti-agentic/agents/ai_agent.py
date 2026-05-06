@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configuration
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11555")
 MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
 MAX_ITERATIONS = 12  # Tăng từ 5 lên 12 để đủ cho multi-step reasoning + tools
 
@@ -167,14 +167,14 @@ def _detect_intent(query: str) -> dict:
         intent     = "ti_general"
         confidence = min(0.85, 0.4 + score_ti * 0.15)
 
-    # Extract device hints
+    # Extract device hints (hostname/IP patterns)
     device_hints = []
     if intent in ("ti_device", "ti_general", "ti_malware"):
-        hostname_pattern = _re.compile(r'\b([a-zA-Z][a-zA-Z0-9\-]{2,}(?:\d+|[-][a-zA-Z0-9]+))\b')
+        # Match patterns like SRV-MAIL-01, server01, PC-Finance, etc.
+        hostname_pattern = _re.compile(r'\b([A-Z0-9][A-Z0-9\-]{1,}[0-9]{1,})\b')
         candidates = hostname_pattern.findall(query)
-        skip = {"the", "and", "for", "not", "this", "that", "with",
-                "có", "và", "không", "trong", "nào", "bị", "đang",
-                "CVE", "NVD", "IOC", "TI", "APT", "server", "device"}
+        skip = {"THE", "AND", "FOR", "NOT", "THIS", "THAT", "WITH",
+                "CVE", "NVD", "IOC", "TI", "APT", "SERVER", "DEVICE"}
         device_hints = [c for c in candidates if c not in skip][:3]
 
     return {
@@ -233,24 +233,22 @@ TOOLS AVAILABLE:
 - check_memory(entity_name) — Kiểm tra lịch sử
 
 QUY TRÌNH (BẮT BUỘC):
-1. search_iocs(query) HOẶC search_malware(query) HOẶC search_vulnerabilities(query)
-2. Nếu tìm được: get_device_matches(threat_name) để tìm assets
-3. Quyết định: alert nếu (found AND risk_high) OR (exploit in wild)
-4. Nếu alert: create_alert(...)
+1. TRY ALL: Tự động gọi search_iocs(query), search_malware(query), search_vulnerabilities(query)
+   - Nếu hash/domain/IP → search_iocs
+   - Nếu có từ khóa malware → search_malware
+   - Nếu có CVE/vuln keyword → search_vulnerabilities
+   - Nếu không chắc → gọi TẤT CẢ để tìm
+2. Nếu tìm được ≥1 kết quả: get_device_matches(threat_name) để tìm assets
+3. create_alert nếu risk >= HIGH
+4. Nếu không tìm được gì: NÓI RÕ "không tìm thấy trong database [OpenCTI]"
 
-OUTPUT FORMAT (BẮT BUỘC SAU MỗI TRẢ LỜI):
+MANDATORY: KHÔNG ĐƯỢC YÊU CẦU USER SEARCH - PHẢI TỰ ĐỘNG GỌI TOOLS
 
-🎯 THREAT NAME: [tên mối đe dọa từ search result]
-📊 DECISION: [Alert / No Alert]
-💡 REASON: [giải thích ngắn 1-2 câu]
-🔗 AFFECTED ASSETS: [số lượng hoặc "N/A"]
-
-RULES:
-- Luôn gọi search_* trước
-- Nếu tìm được kết quả: hiển thị chi tiết từ result (type, score, description)
-- Nếu NOT found: nói rõ "IOC/CVE không tìm thấy trong database"
-- KHÔNG bao giờ bỏ qua search result - phải hiển thị dữ liệu tìm được
-- Response tối đa 200 ký tự (ngoài format trên)
+RESPONSE FORMAT:
+🎯 THREAT: [name or "Not Found"]
+📊 STATUS: [Found / Not Found in Database]
+💡 Details: [type, score, risk_level if found]
+🔗 ASSETS: [count or "N/A"]
 """
 
 # Tool definitions
@@ -501,20 +499,63 @@ TOOLS = [
 ]
 
 
+def _parse_tool_calls_from_text(response_text: str) -> list:
+    """
+    Parse tool calls from response text in format: [TOOL: tool_name|param1:value1|param2:value2]
+    Returns list of (tool_name, args_dict) tuples.
+    Example: [TOOL: search_vulnerabilities|query:CVE-2024-38213] → ("search_vulnerabilities", {"query": "CVE-2024-38213"})
+    """
+    tool_calls = []
+    import re
+
+    # Find all [TOOL: ...] patterns
+    pattern = r'\[TOOL:\s*(\w+)\|([^\]]+)\]'
+    matches = re.finditer(pattern, response_text)
+
+    for match in matches:
+        tool_name = match.group(1)
+        params_str = match.group(2)
+
+        # Parse parameters: param1:value1|param2:value2
+        args_dict = {}
+        param_pairs = params_str.split('|')
+        for pair in param_pairs:
+            if ':' in pair:
+                key, value = pair.split(':', 1)
+                args_dict[key.strip()] = value.strip()
+
+        if tool_name and args_dict:
+            tool_calls.append((tool_name, args_dict))
+
+    return tool_calls
+
+
 def _execute_tool(tool_name: str, arguments: Dict[str, Any], store: Dict) -> Dict[str, Any]:
     """Thực thi một tool và trả về kết quả"""
 
     if tool_name == "search_iocs":
-        query = arguments.get("query", "").lower()
+        query = arguments.get("query", "").lower().strip()
         ioc_type = arguments.get("ioc_type", "")
         risk_level = arguments.get("risk_level", "")
 
         results = []
         for ioc in store.get("iocs", []):
-            # Match by name, pattern, or exact hash
-            matches_query = (query in ioc.get("name", "").lower() or
-                           query in ioc.get("pattern", "").lower() or
-                           query == ioc.get("name", "").lower())
+            ioc_name = ioc.get("name", "").lower().strip()
+            ioc_pattern = ioc.get("pattern", "").lower().strip()
+
+            # Match by name (substring or exact), pattern, or hash (case-insensitive, partial OK)
+            # For hashes: allow partial match if >= 16 chars match
+            is_hash_search = len(query) >= 16 and all(c in '0123456789abcdef' for c in query)
+            matches_query = (query in ioc_name or
+                           query == ioc_name or
+                           query in ioc_pattern or
+                           query == ioc_pattern or
+                           (is_hash_search and len(query) <= len(ioc_name) and query in ioc_name))
+
+            if not matches_query and is_hash_search and ioc.get("ioc_type") == "Hash":
+                # Partial hash match: if first 16+ chars match
+                if ioc_name.startswith(query[:16]):
+                    matches_query = True
 
             if matches_query:
                 if ioc_type and ioc.get("ioc_type") != ioc_type:
@@ -623,15 +664,24 @@ def _execute_tool(tool_name: str, arguments: Dict[str, Any], store: Dict) -> Dic
 
         results = []
         for match in store.get("matches", []):
-            if device_name in match.get("asset_hostname", "").lower() or device_name in match.get("asset_ip", ""):
+            asset_hostname = match.get("asset_hostname", "").lower()
+            asset_ip = match.get("asset_ip", "")
+
+            # Match hostname (exact or substring) or IP (exact)
+            hostname_match = (device_name == asset_hostname or
+                            device_name in asset_hostname or
+                            asset_hostname in device_name)
+            ip_match = (device_name == asset_ip)
+
+            if hostname_match or ip_match:
                 if threat_type and match.get("match_type") != threat_type:
                     continue
                 results.append({
                     "threat_type": match.get("match_type"),
                     "threat_name": match.get("threat_name"),
                     "risk_level": match.get("risk_level"),
-                    "reason": match.get("match_reasons", "")[:100],
-                    "recommendation": match.get("recommendation", "")[:100]
+                    "reason": match.get("match_reasons", "")[:150],
+                    "recommendation": match.get("recommendation", "")[:200]
                 })
 
         return {
@@ -912,20 +962,31 @@ def _build_intent_system_prompt(intent: str, entities: dict, store: dict) -> str
         if entities.get("ips"):
             cve_hint += f"\nIP CẦN KIỂM TRA: {', '.join(entities['ips'])}"
 
-        return f"""Security Analyst analyzing vulnerability.
+        return f"""You are a Security Analyst analyzing vulnerability information.
 {db_context}{cve_hint}
 
-TOOLS AVAILABLE: search_vulnerabilities, search_iocs, enrich_vulnerability, get_device_matches, check_memory, create_alert, save_investigation
+==== TOOL EXECUTION FORMAT ====
+When you need to use a tool, output EXACTLY this format on a new line:
+[TOOL: search_vulnerabilities|query:CVE-2024-38213]
+[TOOL: enrich_vulnerability|cve_id:CVE-2024-38213]
+[TOOL: get_device_matches|threat_name:CVE-2024-38213]
+[TOOL: create_alert|severity:HIGH|threat_name:CVE|affected_assets:HOST1,HOST2|reason:...|action:...]
 
-STEPS:
-1. search_vulnerabilities(query) to find CVE
-2. If needed, enrich_vulnerability(cve_id) for NVD data
-3. get_device_matches(threat_name) to find affected devices
-4. check_memory(entity_name) for history
-5. create_alert(...) if high risk
-6. save_investigation(...) to save findings
+DO NOT start with text analysis. START WITH A TOOL CALL in the format above.
 
-Output plain text with emoji, no HTML or <>."""
+YOUR SEQUENCE:
+1. [TOOL: search_vulnerabilities|query:...] to find the CVE
+2. [TOOL: enrich_vulnerability|cve_id:...] to get CVSS/severity
+3. [TOOL: get_device_matches|threat_name:...] to find affected devices
+4. [TOOL: create_alert|...] if severity >= HIGH and devices affected
+5. [TOOL: save_investigation|...] to save findings
+6. Then output summary in plain text with emoji
+
+RULES:
+- FIRST LINE MUST be a [TOOL: ...] call
+- NEVER ask user to run tools
+- Output format: [TOOL_NAME|param1:value1|param2:value2]
+- No markdown, no HTML, plain text only"""
 
     elif intent == "ti_malware":
         malware_hint = ""
@@ -934,20 +995,29 @@ Output plain text with emoji, no HTML or <>."""
         if entities.get("hashes"):
             malware_hint += f"\nHASH: {', '.join(entities['hashes'])}"
 
-        return f"""Security Analyst analyzing malware.
+        return f"""You are a Security Analyst analyzing malware information.
 {db_context}{malware_hint}
 
-TOOLS AVAILABLE: search_malware, search_iocs, get_device_matches, check_memory, correlate_threats, create_alert, save_investigation
+==== TOOL EXECUTION FORMAT ====
+When you need to use a tool, output EXACTLY this format on a new line:
+[TOOL: search_malware|query:Emotet]
+[TOOL: get_device_matches|threat_name:Emotet]
+[TOOL: create_alert|severity:CRITICAL|threat_name:Emotet|affected_assets:HOST1,HOST2|reason:...|action:...]
 
-STEPS:
-1. search_malware(query) to find malware
-2. search_iocs(query) for related IOCs/hashes
-3. get_device_matches(malware_name) for affected devices
-4. check_memory(malware_name) for history
-5. correlate_threats(malware_name) for relationships
-6. create_alert(...) if needed
+DO NOT start with text analysis. START WITH A TOOL CALL in the format above.
 
-Output plain text with emoji, no HTML or <>."""
+YOUR SEQUENCE:
+1. [TOOL: search_malware|query:...] to find the malware
+2. [TOOL: get_device_matches|threat_name:...] to find affected devices
+3. [TOOL: create_alert|...] if high-risk and devices affected
+4. [TOOL: save_investigation|...] to save findings
+5. Then output summary in plain text with emoji
+
+RULES:
+- FIRST LINE MUST be a [TOOL: ...] call
+- NEVER ask user to run tools
+- Output format: [TOOL_NAME|param1:value1|param2:value2]
+- No markdown, no HTML, plain text only"""
 
     elif intent == "ti_device":
         device_hint = ""
@@ -956,19 +1026,29 @@ Output plain text with emoji, no HTML or <>."""
         elif entities.get("device_hints"):
             device_hint = f"\nTHIẾT BỊ: {', '.join(entities['device_hints'])}"
 
-        return f"""Security Analyst analyzing device risk.
+        return f"""You are a Security Analyst analyzing device risk and threats.
 {db_context}{device_hint}
 
-TOOLS AVAILABLE: get_device_matches, check_memory, search_vulnerabilities, search_iocs, analyze_device, create_alert, save_investigation
+==== TOOL EXECUTION FORMAT ====
+When you need to use a tool, output EXACTLY this format on a new line:
+[TOOL: get_device_matches|threat_name:device_name]
+[TOOL: search_vulnerabilities|query:CVE-XXXX]
+[TOOL: create_alert|severity:HIGH|threat_name:CVE|affected_assets:device_name|reason:...|action:...]
 
-STEPS:
-1. get_device_matches(device_name) to list all threats on device
-2. check_memory(device_name) for history and alerts
-3. search_vulnerabilities or search_iocs for threat details
-4. analyze_device(device_name) for ATT&CK analysis
-5. create_alert(...) if high risk
+DO NOT start with text analysis. START WITH A TOOL CALL in the format above.
 
-Output plain text with emoji, no HTML or <>."""
+YOUR SEQUENCE:
+1. [TOOL: get_device_matches|threat_name:...] to find threats on device
+2. [TOOL: check_memory|entity_name:...] to check prior alerts
+3. [TOOL: create_alert|...] for each high-risk threat found
+4. [TOOL: save_investigation|...] to save findings
+5. Then output summary in plain text with emoji
+
+RULES:
+- FIRST LINE MUST be a [TOOL: ...] call
+- NEVER ask user to run tools
+- Output format: [TOOL_NAME|param1:value1|param2:value2]
+- No markdown, no HTML, plain text only"""
 
     else:  # ti_general
         return _build_system_prompt(store)
@@ -1079,10 +1159,86 @@ def run_agent(user_query: str, store: Dict) -> Generator:
                                 "content": reasoning[:200]  # limit length
                             }
 
-            # Kiểm tra nếu agent muốn gọi tool
-            if hasattr(response.message, 'tool_calls') and response.message.tool_calls:
+            # Check for tool calls (either structured or in text)
+            has_tool_calls = hasattr(response.message, 'tool_calls') and response.message.tool_calls
+
+            # If no structured tool_calls, try to parse from response text
+            parsed_tool_calls = []
+            if not has_tool_calls and response_text:
+                parsed_tool_calls = _parse_tool_calls_from_text(response_text)
+                if parsed_tool_calls:
+                    print(f"[DEBUG] Parsed {len(parsed_tool_calls)} tool calls from response text")
+                    has_tool_calls = True  # Treat parsed calls as tool calls
+
+            if not has_tool_calls and response_text:
+                # Agent generated text without tool calls — log it for debugging
+                print(f"[DEBUG] Iteration {iteration}, Intent: {intent}, NO tool_calls. Text: {response_text[:150]}")
+
+            # Kiểm tra nếu agent muốn gọi tool (structured or parsed)
+            if has_tool_calls:
                 # Agent muốn gọi tool
-                for tool_call in response.message.tool_calls:
+                # Use either structured tool_calls or parsed tool_calls
+                tool_calls_to_process = response.message.tool_calls if not parsed_tool_calls else []
+
+                # If we have parsed tool calls, convert them to a format compatible with processing
+                if parsed_tool_calls:
+                    for tool_name, tool_args in parsed_tool_calls:
+                        yield {
+                            "type": "tool_use",
+                            "step": iteration,
+                            "tool": tool_name,
+                            "args": tool_args
+                        }
+
+                        # Thực thi tool
+                        try:
+                            result = _execute_tool(tool_name, tool_args, store)
+
+                            # Track for self-correction
+                            last_tool_name = tool_name
+                            last_tool_result = result
+
+                            # Self-correction: if search tool returned no results, suggest next tool
+                            if tool_name in ["search_iocs", "search_malware", "search_vulnerabilities"]:
+                                if _should_retry(result, tool_name):
+                                    retry_tool = _get_retry_tool(tool_name)
+                                    if retry_tool:
+                                        result["_self_correction"] = f"No results, try {retry_tool} instead"
+                                        yield {
+                                            "type": "self_correction",
+                                            "step": iteration,
+                                            "original_tool": tool_name,
+                                            "suggestion": f"No results with {tool_name}, suggesting {retry_tool}"
+                                        }
+
+                            messages.append({
+                                "role": "assistant",
+                                "content": "",
+                                "tool_calls": []
+                            })
+                            messages.append({
+                                "role": "tool",
+                                "content": json.dumps(result, ensure_ascii=False)
+                            })
+
+                            yield {
+                                "type": "tool_result",
+                                "step": iteration,
+                                "tool": tool_name,
+                                "result": result
+                            }
+                        except Exception as e:
+                            yield {
+                                "type": "tool_error",
+                                "step": iteration,
+                                "tool": tool_name,
+                                "error": str(e)
+                            }
+                    # After processing parsed calls, continue to next iteration
+                    continue
+
+                # Process structured tool calls
+                for tool_call in tool_calls_to_process:
                     tool_name = tool_call.function.name
                     tool_args = tool_call.function.arguments
 
@@ -1140,9 +1296,9 @@ def run_agent(user_query: str, store: Dict) -> Generator:
                             yield {
                                 "type": "alert",
                                 "severity": tool_args.get("severity", "high"),
-                                "threat_name": tool_args.get("threat_name", ""),
-                                "affected_assets": tool_args.get("affected_assets", []),
-                                "alert_message": result.get("message", "")
+                                "threat": tool_args.get("threat_name", ""),
+                                "assets": tool_args.get("affected_assets", []),
+                                "message": result.get("message", "")
                             }
                         elif tool_name == "check_memory" and result.get("found"):
                             yield {
@@ -1165,7 +1321,63 @@ def run_agent(user_query: str, store: Dict) -> Generator:
                             "error": str(e)
                         }
             else:
-                # Agent có câu trả lời cuối
+                # Agent không gọi tool, chỉ generate text
+                # AUTO-TRIGGER: Nếu là TI query và iteration <= 2 → BUỘC gọi search tools thay vì trả response
+                should_auto_trigger = (iteration <= 2 and intent != "normal" and
+                                     intent in ["ti_vuln", "ti_malware", "ti_device", "ti_general"])
+
+                if should_auto_trigger:
+                    # Auto-trigger search based on intent — DON'T show agent's text response
+                    auto_tool = None
+                    auto_query = effective_query
+
+                    # Detect IOC/hash/IP/CVE in query
+                    has_hash = len(entities.get("hashes", [])) > 0 or _HASH_PATTERN.search(user_query)
+                    has_ip = len(entities.get("ips", [])) > 0
+                    has_cve = len(entities.get("cves", [])) > 0
+                    has_malware = len(entities.get("malware_names", [])) > 0
+
+                    # Choose tool based on what was found
+                    if has_cve:
+                        auto_tool = "search_vulnerabilities"
+                    elif has_malware:
+                        auto_tool = "search_malware"
+                    elif has_hash or has_ip:
+                        auto_tool = "search_iocs"
+                    elif intent == "ti_vuln":
+                        auto_tool = "search_vulnerabilities"
+                    elif intent == "ti_malware":
+                        auto_tool = "search_malware"
+                    elif intent in ["ti_device", "ti_general"]:
+                        # Default for general: try search_iocs (covers hash/IP/domain)
+                        auto_tool = "search_iocs"
+
+                    if auto_tool:
+                        # Force tool call without showing agent's text response
+                        result = _execute_tool(auto_tool, {"query": auto_query}, store)
+
+                        # Add to message history so agent can process
+                        messages.append({
+                            "role": "assistant",
+                            "content": "",  # Empty content, tool call only
+                            "tool_calls": []
+                        })
+                        messages.append({
+                            "role": "tool",
+                            "content": json.dumps(result, ensure_ascii=False)
+                        })
+
+                        yield {
+                            "type": "tool_result",
+                            "step": iteration,
+                            "tool": auto_tool,
+                            "result": result
+                        }
+                        # Continue loop to let agent process result
+                        continue
+
+                # If agent still doesn't call tools after 2 iterations, return final response
+                # Only return text responses on iteration > 1 or for non-TI queries
                 final_response = response.message.content
                 yield {
                     "type": "final",

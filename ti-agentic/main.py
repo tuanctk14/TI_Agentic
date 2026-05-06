@@ -17,7 +17,7 @@ import pandas as pd
 from dotenv import load_dotenv
 
 load_dotenv()
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11555")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
 ollama.Client(host=OLLAMA_HOST)
 
@@ -138,9 +138,9 @@ def _refresh():
         from agents.matching_agent import run_all_matching
         from agents.nvd_client import fetch_nvd
 
-        # Bước 1: Lấy dữ liệu từ OpenCTI (với cache fallback)
-        print("  [1/5] Lay du lieu tu OpenCTI...")
-        data = fetch_all(limit=0)
+        # Bước 1: Lấy dữ liệu từ OpenCTI (incremental - chỉ lấy dữ liệu mới)
+        print("  [1/5] Lay du lieu tu OpenCTI (incremental mode)...")
+        data = fetch_all(limit=0, incremental=True, force_refresh=False)
         if not data.get("iocs"):
             print(f"  ⚠️ Khong co du lieu, dung cache cu")
             return

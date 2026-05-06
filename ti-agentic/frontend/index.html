@@ -1284,11 +1284,7 @@ function initChat(){
         }
         else if(data.type==='thinking'){
           hideTyping();
-          const toolName={search_iocs:'Tìm IOC',search_malware:'Tìm Malware',search_vulnerabilities:'Tìm CVE',
-            get_threat_detail:'Chi tiết Threat',analyze_device:'Phân tích Device',correlate_threats:'Liên hệ Threats',
-            get_device_matches:'Threats trên Device',enrich_vulnerability:'Làm giàu CVE (NVD)',
-            check_memory:'Kiểm tra bộ nhớ',create_alert:'Tạo Alert',save_investigation:'Lưu kết quả'}[data.tool]||data.tool;
-          addMsg('tool',`🔧 ${toolName}`);
+          // Hide tool execution messages - internal only
         }
         else if(data.type==='tool_result'){
           // Skip displaying tool results - they're internal
@@ -1297,18 +1293,12 @@ function initChat(){
         }
         else if(data.type==='alert'){
           hideTyping();
-          // Sanitize message - remove HTML tags
           const sanitize = (str) => String(str).replace(/[<>]/g, ch => ({'>':'&gt;','<':'&lt;'}[ch]||ch));
-          addMsg('alert',`
-            <div style="padding:10px;border-radius:8px;border:1px solid #dc2626;background:#fee2e2">
-              <b style="color:#991b1b">🚨 ALERT [${sanitize(data.severity||'HIGH').toUpperCase()}]</b><br>
-              <div style="margin-top:6px;font-size:13px">
-                <b>${sanitize(data.threat||'?')}</b><br>
-                <span style="color:#666">Assets:</span> ${(data.assets||[]).map(a=>sanitize(a)).join(', ')||'N/A'}<br>
-                <span style="color:#991b1b;font-weight:bold">${sanitize(data.message||'Review immediately')}</span>
-              </div>
-            </div>
-          `);
+          const severity = sanitize(data.severity||'HIGH').toUpperCase();
+          const threat = sanitize(data.threat||'?');
+          const assets = (data.assets||[]).map(a=>sanitize(a)).join(', ')||'N/A';
+          const message = sanitize(data.message||'Review immediately');
+          addMsg('alert',`🚨 ALERT [${severity}]\n${threat}\nAssets: ${assets}\n${message}`);
         }
         else if(data.type==='memory_recall'){
           hideTyping();

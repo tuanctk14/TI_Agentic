@@ -20,7 +20,12 @@
       "PowerShell(Stop-Process -Force)",
       "PowerShell(\"Killed all Python\")",
       "Bash(rm server.log)",
-      "Bash(python main.py)"
+      "Bash(python main.py)",
+      "Bash(git reset *)",
+      "Bash(git push *)",
+      "Bash(awk '{print $2}')",
+      "Bash(xargs kill -9)",
+      "Bash(./venv/Scripts/python main.py 8005)"
     ]
   }
 }
